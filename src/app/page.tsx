@@ -8,11 +8,14 @@ import MessageCard from '@/components/MessageCard'
 
 export default function Home() {
   const [energy, setEnergy] = useState<Energy>('mid')
-  const [mode, setMode] = useState<'inbox' | 'next' | 'chat'>('chat')
+  const [mode, setMode] = useState<'inbox' | 'triage' | 'next' | 'chat'>('chat')
   const [kbHeight, setKbHeight] = useState(0)
   const [showTodo, setShowTodo] = useState(false)
   const [todoContent, setTodoContent] = useState<string | null>(null)
   const [todoLoading, setTodoLoading] = useState(false)
+  const [showInbox, setShowInbox] = useState(false)
+  const [inboxContent, setInboxContent] = useState<string | null>(null)
+  const [inboxLoading, setInboxLoading] = useState(false)
 
   const energyRef = useRef(energy)
   const modeRef = useRef(mode)
@@ -109,6 +112,25 @@ export default function Home() {
     setTodoLoading(false)
   }
 
+  const openInbox = async () => {
+    setShowInbox(true)
+    setInboxLoading(true)
+    setInboxContent(null)
+    const res = await fetch('/api/brain?file=inbox')
+    const data = await res.json()
+    setInboxContent(data.content)
+    setInboxLoading(false)
+  }
+
+  const triggerTriage = () => {
+    if (isLoading) return
+    setMode('triage')
+    append(
+      { role: 'user', content: '/triage' },
+      { body: { energy: energyRef.current, mode: 'triage' } },
+    )
+  }
+
   return (
     <div ref={containerRef} className="fixed top-0 inset-x-0 flex flex-col max-w-lg mx-auto" style={{ height: '100svh' }}>
       {showTodo && (
@@ -137,17 +159,51 @@ export default function Home() {
         </div>
       )}
 
+      {showInbox && (
+        <div className="absolute inset-0 z-10 flex flex-col bg-stone-50 dark:bg-stone-950">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100 dark:border-stone-800">
+            <span className="text-sm font-medium text-stone-600 dark:text-stone-400">Inbox</span>
+            <button
+              onClick={() => setShowInbox(false)}
+              aria-label="Close"
+              className="text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            {inboxLoading ? (
+              <p className="text-stone-400 dark:text-stone-500 text-sm animate-pulse">Loading…</p>
+            ) : inboxContent ? (
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <ReactMarkdown>{inboxContent}</ReactMarkdown>
+              </div>
+            ) : (
+              <p className="text-stone-400 dark:text-stone-500 text-sm">Inbox is empty.</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="flex items-center justify-between px-4 pt-safe border-b border-stone-100 dark:border-stone-800 py-3">
         <span className="text-stone-600 dark:text-stone-400 font-medium tracking-tight select-none">
           tasks
         </span>
-        <button
-          onClick={openTodo}
-          className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors select-none"
-        >
-          todo
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={openInbox}
+            className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors select-none"
+          >
+            inbox
+          </button>
+          <button
+            onClick={openTodo}
+            className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors select-none"
+          >
+            todo
+          </button>
+        </div>
         <EngineCheck energy={energy} onChange={setEnergy} />
       </header>
 
@@ -204,7 +260,7 @@ export default function Home() {
           <textarea
             ref={textareaRef}
             value={input}
-            placeholder={mode === 'inbox' ? "What's the ugh?" : "What's on your mind?"}
+            placeholder={mode === 'inbox' ? "What's the ugh?" : mode === 'triage' ? 'Ready when you are…' : "What's on your mind?"}
             rows={1}
             className="flex-1 resize-none rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2.5 text-base text-stone-800 dark:text-stone-200 placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-300 dark:focus:ring-stone-600 transition-shadow"
             onChange={(e) => {
@@ -245,6 +301,17 @@ export default function Home() {
             }`}
           >
             /inbox
+          </button>
+          <button
+            onClick={triggerTriage}
+            disabled={isLoading}
+            className={`flex-1 rounded-lg border py-2 text-xs transition-colors ${
+              mode === 'triage'
+                ? 'border-stone-400 dark:border-stone-500 text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800'
+                : 'border-stone-200 dark:border-stone-700 text-stone-500 dark:text-stone-400 hover:border-stone-400 dark:hover:border-stone-500 hover:text-stone-700 dark:hover:text-stone-200 disabled:opacity-30'
+            }`}
+          >
+            /triage
           </button>
         </div>
       </footer>
