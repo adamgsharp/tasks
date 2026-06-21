@@ -8,6 +8,7 @@ import MessageCard from '@/components/MessageCard'
 export default function Home() {
   const [energy, setEnergy] = useState<Energy>('mid')
   const [mode, setMode] = useState<'inbox' | 'next' | 'chat'>('chat')
+  const [kbHeight, setKbHeight] = useState(0)
 
   const energyRef = useRef(energy)
   const modeRef = useRef(mode)
@@ -26,15 +27,18 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Track keyboard height via visualViewport and expose it as --kb on the
-  // container. The footer reads --kb as padding-bottom so it floats just
-  // above the keyboard while the flex-1 chat area fills whatever's left.
+  // Keep the container pinned to the visible area above the keyboard.
+  // The container is position:fixed so iOS can't scroll it, but we still
+  // need to shrink it from the bottom as the keyboard rises. We also call
+  // scrollTo(0,0) to cancel any residual scroll iOS applies asynchronously.
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
     const update = () => {
-      const kb = Math.max(0, window.innerHeight - vv.offsetTop - vv.height)
-      containerRef.current?.style.setProperty('--kb', `${kb}px`)
+      window.scrollTo(0, 0)
+      const kb = Math.max(0, window.innerHeight - (vv.offsetTop + vv.height))
+      if (containerRef.current) containerRef.current.style.bottom = `${kb}px`
+      setKbHeight(kb)
       if (kb > 0) {
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'instant' }), 50)
       }
@@ -82,7 +86,7 @@ export default function Home() {
   }
 
   return (
-    <div ref={containerRef} className="flex flex-col h-full max-w-lg mx-auto">
+    <div ref={containerRef} className="fixed inset-0 flex flex-col max-w-lg mx-auto">
       {/* Header */}
       <header className="flex items-center justify-between px-4 pt-safe border-b border-stone-100 dark:border-stone-800 py-3">
         <span className="text-stone-600 dark:text-stone-400 font-medium tracking-tight select-none">
@@ -117,10 +121,12 @@ export default function Home() {
         <div ref={messagesEndRef} />
       </main>
 
-      {/* Input area — padding-bottom tracks keyboard height via --kb */}
+      {/* Input area — padding-bottom gives safe-area clearance when keyboard
+          is hidden; a small gap when it's open (container already ends just
+          above the keyboard so no large offset needed). */}
       <footer
         className="border-t border-stone-100 dark:border-stone-800 px-4 pt-3 space-y-2.5"
-        style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 12px), var(--kb, 12px))' }}
+        style={{ paddingBottom: kbHeight > 0 ? '8px' : 'max(env(safe-area-inset-bottom, 12px), 12px)' }}
       >
         {mode !== 'chat' && (
           <div className="flex items-center gap-2">
