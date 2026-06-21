@@ -2,6 +2,7 @@
 
 import { useChat } from 'ai/react'
 import { useRef, useEffect, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
 import EngineCheck, { type Energy } from '@/components/EngineCheck'
 import MessageCard from '@/components/MessageCard'
 
@@ -9,6 +10,9 @@ export default function Home() {
   const [energy, setEnergy] = useState<Energy>('mid')
   const [mode, setMode] = useState<'inbox' | 'next' | 'chat'>('chat')
   const [kbHeight, setKbHeight] = useState(0)
+  const [showTodo, setShowTodo] = useState(false)
+  const [todoContent, setTodoContent] = useState<string | null>(null)
+  const [todoLoading, setTodoLoading] = useState(false)
 
   const energyRef = useRef(energy)
   const modeRef = useRef(mode)
@@ -95,13 +99,55 @@ export default function Home() {
     textareaRef.current?.focus()
   }
 
+  const openTodo = async () => {
+    setShowTodo(true)
+    setTodoLoading(true)
+    setTodoContent(null)
+    const res = await fetch('/api/brain?file=todo')
+    const data = await res.json()
+    setTodoContent(data.content)
+    setTodoLoading(false)
+  }
+
   return (
     <div ref={containerRef} className="fixed top-0 inset-x-0 flex flex-col max-w-lg mx-auto" style={{ height: '100svh' }}>
+      {showTodo && (
+        <div className="absolute inset-0 z-10 flex flex-col bg-stone-50 dark:bg-stone-950">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100 dark:border-stone-800">
+            <span className="text-sm font-medium text-stone-600 dark:text-stone-400">To Do</span>
+            <button
+              onClick={() => setShowTodo(false)}
+              aria-label="Close"
+              className="text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            {todoLoading ? (
+              <p className="text-stone-400 dark:text-stone-500 text-sm animate-pulse">Loading…</p>
+            ) : todoContent ? (
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <ReactMarkdown>{todoContent}</ReactMarkdown>
+              </div>
+            ) : (
+              <p className="text-stone-400 dark:text-stone-500 text-sm">Nothing here.</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="flex items-center justify-between px-4 pt-safe border-b border-stone-100 dark:border-stone-800 py-3">
         <span className="text-stone-600 dark:text-stone-400 font-medium tracking-tight select-none">
           tasks
         </span>
+        <button
+          onClick={openTodo}
+          className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors select-none"
+        >
+          todo
+        </button>
         <EngineCheck energy={energy} onChange={setEnergy} />
       </header>
 
