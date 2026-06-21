@@ -27,26 +27,23 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Keep the container pinned to the visible area above the keyboard.
-  // The container is position:fixed so iOS can't scroll it, but we still
-  // need to shrink it from the bottom as the keyboard rises. We also call
-  // scrollTo(0,0) to cancel any residual scroll iOS applies asynchronously.
+  // Pin container height to the visual viewport so it always ends just above
+  // the keyboard. We set height (not bottom) so it works even when vv.offsetTop
+  // is non-zero. We call update() immediately so the height is correct before
+  // any events fire. No scrollTo: calling it mid-animation cancels iOS keyboard
+  // resize events so we only ever see an intermediate vv.height.
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
     const update = () => {
-      window.scrollTo(0, 0)
-      // Physical keyboard height = full screen minus visual viewport height.
-      // We intentionally ignore vv.offsetTop: iOS can scroll the visual viewport
-      // when focusing an input, making offsetTop non-zero and the old formula
-      // undercount the keyboard by that amount.
+      if (containerRef.current) containerRef.current.style.height = `${vv.height}px`
       const kb = Math.max(0, window.innerHeight - vv.height)
-      if (containerRef.current) containerRef.current.style.bottom = `${kb}px`
       setKbHeight(kb)
       if (kb > 0) {
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'instant' }), 50)
       }
     }
+    update()
     vv.addEventListener('resize', update)
     vv.addEventListener('scroll', update)
     return () => {
@@ -90,7 +87,7 @@ export default function Home() {
   }
 
   return (
-    <div ref={containerRef} className="fixed inset-0 flex flex-col max-w-lg mx-auto">
+    <div ref={containerRef} className="fixed top-0 inset-x-0 flex flex-col max-w-lg mx-auto" style={{ height: '100svh' }}>
       {/* Header */}
       <header className="flex items-center justify-between px-4 pt-safe border-b border-stone-100 dark:border-stone-800 py-3">
         <span className="text-stone-600 dark:text-stone-400 font-medium tracking-tight select-none">
