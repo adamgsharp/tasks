@@ -16,6 +16,7 @@ export default function Home() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   const { messages, input, setInput, isLoading, append } = useChat({
     body: { energy: energyRef.current, mode: modeRef.current },
@@ -25,14 +26,25 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Scroll chat to bottom when the keyboard opens so the latest message stays visible.
+  // Track keyboard height via visualViewport and expose it as --kb on the
+  // container. The footer reads --kb as padding-bottom so it floats just
+  // above the keyboard while the flex-1 chat area fills whatever's left.
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
-    const handler = () =>
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
-    vv.addEventListener('resize', handler)
-    return () => vv.removeEventListener('resize', handler)
+    const update = () => {
+      const kb = Math.max(0, window.innerHeight - vv.offsetTop - vv.height)
+      containerRef.current?.style.setProperty('--kb', `${kb}px`)
+      if (kb > 0) {
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'instant' }), 50)
+      }
+    }
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => {
+      vv.removeEventListener('resize', update)
+      vv.removeEventListener('scroll', update)
+    }
   }, [])
 
   const resizeTextarea = () => {
@@ -70,7 +82,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex flex-col h-dvh max-w-lg mx-auto">
+    <div ref={containerRef} className="flex flex-col h-full max-w-lg mx-auto">
       {/* Header */}
       <header className="flex items-center justify-between px-4 pt-safe border-b border-stone-100 dark:border-stone-800 py-3">
         <span className="text-stone-600 dark:text-stone-400 font-medium tracking-tight select-none">
@@ -105,8 +117,11 @@ export default function Home() {
         <div ref={messagesEndRef} />
       </main>
 
-      {/* Input area */}
-      <footer className="border-t border-stone-100 dark:border-stone-800 px-4 pt-3 pb-safe space-y-2.5">
+      {/* Input area — padding-bottom tracks keyboard height via --kb */}
+      <footer
+        className="border-t border-stone-100 dark:border-stone-800 px-4 pt-3 space-y-2.5"
+        style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 12px), var(--kb, 12px))' }}
+      >
         {mode !== 'chat' && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-stone-400 dark:text-stone-500">

@@ -13,6 +13,11 @@
 
 html,
 body {
+  /* position: fixed stops iOS Safari from scrolling the page when a
+     textarea is focused, which would hoist the entire UI off-screen. */
+  position: fixed;
+  width: 100%;
   height: 100%;
+  overflow: hidden;
   overscroll-behavior: none;
 }
