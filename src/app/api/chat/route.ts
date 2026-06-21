@@ -80,7 +80,7 @@ export async function POST(req: Request) {
     messages,
     tools,
     maxSteps: tools ? 5 : 1,
-    maxTokens: 1024,
+    maxTokens: 8192,
   })
 
   return result.toDataStreamResponse()
