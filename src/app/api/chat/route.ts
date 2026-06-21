@@ -28,10 +28,10 @@ export async function POST(req: Request) {
     ? {
         save_brain_file: tool({
           description:
-            'Overwrite a brain file with complete new content and commit it to the vault. Use to capture to inbox.md or file/organize tasks in todo.md. Always send the full file content, not a fragment.',
+            'Overwrite a brain file with complete new content and commit it to the vault. Use to capture to inbox.md, file/organize tasks in todo.md, or mark something done and log wins in done.md. Always send the full file content, not a fragment.',
           parameters: z.object({
             file: z
-              .enum(['inbox.md', 'todo.md'])
+              .enum(['inbox.md', 'todo.md', 'done.md'])
               .describe('Which brain file to write.'),
             content: z
               .string()
@@ -67,7 +67,7 @@ export async function POST(req: Request) {
     system: await buildSystemPrompt(mode, energy),
     messages,
     tools,
-    maxSteps: tools ? 3 : 1,
+    maxSteps: tools ? 5 : 1,
     maxTokens: 1024,
   })
 
