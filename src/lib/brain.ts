@@ -2,22 +2,34 @@ import fs from 'fs'
 import path from 'path'
 import { getFile, githubConfigured } from '@/lib/github'
 
-// Reads a brain file. When GitHub is configured, reads live from the repo so
-// the app always reflects the latest committed state (including write-backs it
-// just made). Otherwise falls back to the deployed filesystem copy.
-async function readBrainFile(filename: string): Promise<string> {
+// File paths are configurable via env vars so the app can point at an existing
+// Obsidian vault repo with its own naming conventions (e.g. "To Do.md" at root).
+// Defaults match the files in this repo's brain/ folder.
+function brainPaths() {
+  return {
+    todo: process.env.BRAIN_TODO_PATH ?? 'brain/To Do.md',
+    inbox: process.env.BRAIN_INBOX_PATH ?? 'brain/Inbox.md',
+    done: process.env.BRAIN_DONE_PATH ?? 'brain/Done.md',
+    context: process.env.BRAIN_CONTEXT_PATH ?? 'brain/Context.md',
+  }
+}
+
+// Reads a file by its full repo path. When GitHub is configured, reads live
+// from the repo so the app always reflects the latest committed state.
+// Falls back to the deployed filesystem copy on transient GitHub errors.
+async function readBrainFile(repoPath: string): Promise<string> {
   if (githubConfigured()) {
     try {
-      const file = await getFile(`brain/${filename}`)
-      return file ? file.content : `[${filename} not found]`
+      const file = await getFile(repoPath)
+      return file ? file.content : `[${repoPath} not found]`
     } catch {
       // fall through to filesystem on transient GitHub errors
     }
   }
   try {
-    return fs.readFileSync(path.join(process.cwd(), 'brain', filename), 'utf-8')
+    return fs.readFileSync(path.join(process.cwd(), repoPath), 'utf-8')
   } catch {
-    return `[${filename} not found]`
+    return `[${repoPath} not found]`
   }
 }
 
@@ -25,11 +37,12 @@ export async function buildSystemPrompt(
   mode: string,
   energy: string,
 ): Promise<string> {
+  const paths = brainPaths()
   const [context, todo, inbox, done] = await Promise.all([
-    readBrainFile('context.md'),
-    readBrainFile('todo.md'),
-    readBrainFile('inbox.md'),
-    readBrainFile('done.md'),
+    readBrainFile(paths.context),
+    readBrainFile(paths.todo),
+    readBrainFile(paths.inbox),
+    readBrainFile(paths.done),
   ])
 
   const energyLabel =

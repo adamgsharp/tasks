@@ -6,6 +6,15 @@ import { getFile, putFile, githubConfigured } from '@/lib/github'
 
 export const runtime = 'nodejs'
 
+// Mirrors brainPaths() in brain.ts — both must stay in sync.
+function brainPaths() {
+  return {
+    todo: process.env.BRAIN_TODO_PATH ?? 'brain/To Do.md',
+    inbox: process.env.BRAIN_INBOX_PATH ?? 'brain/Inbox.md',
+    done: process.env.BRAIN_DONE_PATH ?? 'brain/Done.md',
+  }
+}
+
 export async function POST(req: Request) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return new Response(
@@ -21,18 +30,25 @@ export async function POST(req: Request) {
 
   const model = process.env.CLAUDE_MODEL ?? 'claude-sonnet-4-6'
   const canWrite = githubConfigured()
+  const paths = brainPaths()
 
-  // Only expose the write-back tool when GitHub is configured. Without it the
-  // app stays read-only and behaves exactly as before.
+  // Map logical name → actual repo path so Claude uses simple names in the
+  // tool but writes to the correct path in whatever vault repo is configured.
+  const fileMap: Record<string, string> = {
+    todo: paths.todo,
+    inbox: paths.inbox,
+    done: paths.done,
+  }
+
   const tools = canWrite
     ? {
         save_brain_file: tool({
           description:
-            'Overwrite a brain file with complete new content and commit it to the vault. Use to capture to inbox.md, file/organize tasks in todo.md, or mark something done and log wins in done.md. Always send the full file content, not a fragment.',
+            'Overwrite a brain file with complete new content and commit it to the vault. Use "inbox" to capture, "todo" to file/organize tasks, "done" to mark complete or log today\'s win. Always send the full file content, not a fragment.',
           parameters: z.object({
             file: z
-              .enum(['inbox.md', 'todo.md', 'done.md'])
-              .describe('Which brain file to write.'),
+              .enum(['todo', 'inbox', 'done'])
+              .describe('Which brain file to write: todo, inbox, or done.'),
             content: z
               .string()
               .describe('The complete new file content (replaces the file).'),
@@ -41,14 +57,10 @@ export async function POST(req: Request) {
               .describe('Short plain commit message describing the change.'),
           }),
           execute: async ({ file, content, summary }) => {
+            const repoPath = fileMap[file]
             try {
-              const existing = await getFile(`brain/${file}`)
-              await putFile(
-                `brain/${file}`,
-                content,
-                `tasks: ${summary}`,
-                existing?.sha,
-              )
+              const existing = await getFile(repoPath)
+              await putFile(repoPath, content, `tasks: ${summary}`, existing?.sha)
               return { ok: true, file, summary }
             } catch (err) {
               return {
