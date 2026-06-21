@@ -36,7 +36,11 @@ export default function Home() {
     if (!vv) return
     const update = () => {
       window.scrollTo(0, 0)
-      const kb = Math.max(0, window.innerHeight - (vv.offsetTop + vv.height))
+      // Physical keyboard height = full screen minus visual viewport height.
+      // We intentionally ignore vv.offsetTop: iOS can scroll the visual viewport
+      // when focusing an input, making offsetTop non-zero and the old formula
+      // undercount the keyboard by that amount.
+      const kb = Math.max(0, window.innerHeight - vv.height)
       if (containerRef.current) containerRef.current.style.bottom = `${kb}px`
       setKbHeight(kb)
       if (kb > 0) {
