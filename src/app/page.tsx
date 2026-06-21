@@ -25,6 +25,16 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // Scroll chat to bottom when the keyboard opens so the latest message stays visible.
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const handler = () =>
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    vv.addEventListener('resize', handler)
+    return () => vv.removeEventListener('resize', handler)
+  }, [])
+
   const resizeTextarea = () => {
     const el = textareaRef.current
     if (!el) return
@@ -119,7 +129,7 @@ export default function Home() {
             value={input}
             placeholder={mode === 'inbox' ? "What's the ugh?" : "What's on your mind?"}
             rows={1}
-            className="flex-1 resize-none rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2.5 text-sm text-stone-800 dark:text-stone-200 placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-300 dark:focus:ring-stone-600 transition-shadow"
+            className="flex-1 resize-none rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2.5 text-base text-stone-800 dark:text-stone-200 placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-300 dark:focus:ring-stone-600 transition-shadow"
             onChange={(e) => {
               setInput(e.target.value)
               resizeTextarea()
