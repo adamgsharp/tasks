@@ -26,17 +26,40 @@ export default function MessageCard({ message }: Props) {
     )
   }
 
+  // Surface any successful write-backs so Adam can trust the change landed.
+  const saves = (message.toolInvocations ?? []).filter(
+    (t) =>
+      t.toolName === 'save_brain_file' &&
+      t.state === 'result' &&
+      (t.result as { ok?: boolean } | undefined)?.ok,
+  )
+
   return (
     <div className="rounded-2xl rounded-tl-sm bg-white dark:bg-stone-900 border border-stone-100 dark:border-stone-800 px-5 py-4 shadow-sm">
-      <ReactMarkdown
-        className="prose prose-sm prose-stone dark:prose-invert max-w-none
-          prose-p:my-1.5 prose-p:leading-relaxed
-          prose-strong:font-semibold prose-strong:text-stone-800 dark:prose-strong:text-stone-100
-          prose-ul:my-1.5 prose-li:my-0.5
-          prose-headings:font-semibold prose-headings:text-stone-800 dark:prose-headings:text-stone-100"
-      >
-        {message.content}
-      </ReactMarkdown>
+      {message.content && (
+        <ReactMarkdown
+          className="prose prose-sm prose-stone dark:prose-invert max-w-none
+            prose-p:my-1.5 prose-p:leading-relaxed
+            prose-strong:font-semibold prose-strong:text-stone-800 dark:prose-strong:text-stone-100
+            prose-ul:my-1.5 prose-li:my-0.5
+            prose-headings:font-semibold prose-headings:text-stone-800 dark:prose-headings:text-stone-100"
+        >
+          {message.content}
+        </ReactMarkdown>
+      )}
+
+      {saves.map((t) => {
+        const file = (t.args as { file?: string }).file
+        return (
+          <div
+            key={t.toolCallId}
+            className="mt-2 flex items-center gap-1.5 text-xs text-stone-400 dark:text-stone-500"
+          >
+            <span>✓</span>
+            <span>saved to {file}</span>
+          </div>
+        )
+      })}
     </div>
   )
 }

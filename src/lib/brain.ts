@@ -1,7 +1,19 @@
 import fs from 'fs'
 import path from 'path'
+import { getFile, githubConfigured } from '@/lib/github'
 
-function readBrainFile(filename: string): string {
+// Reads a brain file. When GitHub is configured, reads live from the repo so
+// the app always reflects the latest committed state (including write-backs it
+// just made). Otherwise falls back to the deployed filesystem copy.
+async function readBrainFile(filename: string): Promise<string> {
+  if (githubConfigured()) {
+    try {
+      const file = await getFile(`brain/${filename}`)
+      return file ? file.content : `[${filename} not found]`
+    } catch {
+      // fall through to filesystem on transient GitHub errors
+    }
+  }
   try {
     return fs.readFileSync(path.join(process.cwd(), 'brain', filename), 'utf-8')
   } catch {
@@ -9,10 +21,15 @@ function readBrainFile(filename: string): string {
   }
 }
 
-export function buildSystemPrompt(mode: string, energy: string): string {
-  const context = readBrainFile('context.md')
-  const todo = readBrainFile('todo.md')
-  const inbox = readBrainFile('inbox.md')
+export async function buildSystemPrompt(
+  mode: string,
+  energy: string,
+): Promise<string> {
+  const [context, todo, inbox] = await Promise.all([
+    readBrainFile('context.md'),
+    readBrainFile('todo.md'),
+    readBrainFile('inbox.md'),
+  ])
 
   const energyLabel =
     energy === 'high' ? '🔥 high' : energy === 'low' ? '🪫 low' : '😐 mid'
@@ -75,6 +92,21 @@ ${inbox}
 ## Current energy: ${energyLabel}
 
 ${modeInstructions}
+
+## Saving changes (write-back)
+You can edit the vault yourself using the \`save_brain_file\` tool. It overwrites a file with complete new content, commits to GitHub, and the change flows back to Obsidian. Use it to do the sorting so Adam never has to.
+
+When to save:
+- A capture worth keeping → append it to \`inbox.md\` (newest first, under the comment line). Capture is dumb-easy; never make him file it.
+- A real task emerges (from a dump or the conversation) → add it to the right section of \`todo.md\` (Priorities / MITs / Active Projects / Waiting / On Hold / Someday). Put anything needing another person under "Waiting / Background pings."
+- You processed an inbox item into a task or resolved it → remove it from \`inbox.md\` so the inbox trends toward empty.
+
+How to save correctly:
+- Always pass the COMPLETE new file content, not a fragment — you have the current content above; apply your change to it and send the whole thing.
+- Preserve existing formatting, headings, and table structure.
+- Only write when there's a real change. Pure conversation, questions, or "permission to drop it" need no save.
+- Keep the \`summary\` short and plain (it becomes the commit message), e.g. "file CPAP question under Waiting".
+- After saving, tell Adam in one short line what you filed and where — don't make him wonder if it stuck.
 
 ## Voice
 Be a knowledgeable partner reasoning out loud and flagging your own uncertainty when you don't have full information — e.g., "you emailed them only 2 days ago, so no need to revisit yet." Specific, contextual, warm, brief. Reference actual items from his lists. Not a status dashboard. Never "Go get 'em." Never invent details about his life that aren't in the context file.`
