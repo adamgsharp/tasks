@@ -16,6 +16,7 @@ export default function Home() {
   useEffect(() => { modeRef.current = mode }, [mode])
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const mainRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -28,19 +29,27 @@ export default function Home() {
   }, [messages])
 
   // Pin container height to the visual viewport so it always ends just above
-  // the keyboard. We set height (not bottom) so it works even when vv.offsetTop
-  // is non-zero. We call update() immediately so the height is correct before
-  // any events fire. No scrollTo: calling it mid-animation cancels iOS keyboard
-  // resize events so we only ever see an intermediate vv.height.
+  // the keyboard. On every vv.resize/scroll:
+  //  1. Set container height = vv.height (correct end-state regardless of animation frame)
+  //  2. If iOS scrolled the page to reveal the textarea (vv.offsetTop > 0), undo
+  //     it via requestAnimationFrame — deferred so we don't cancel mid-animation
+  //     keyboard resize events the way a synchronous scrollTo did.
+  //  3. Scroll the messages container directly (not scrollIntoView, which on iOS
+  //     can aggressively scroll the window and fight the viewport reset).
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
     const update = () => {
       if (containerRef.current) containerRef.current.style.height = `${vv.height}px`
+      if (vv.offsetTop > 0) {
+        requestAnimationFrame(() => window.scrollTo(0, 0))
+      }
       const kb = Math.max(0, window.innerHeight - vv.height)
       setKbHeight(kb)
       if (kb > 0) {
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'instant' }), 50)
+        setTimeout(() => {
+          if (mainRef.current) mainRef.current.scrollTop = mainRef.current.scrollHeight
+        }, 50)
       }
     }
     update()
@@ -97,7 +106,7 @@ export default function Home() {
       </header>
 
       {/* Messages */}
-      <main className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
+      <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-center select-none">
             <p className="text-stone-400 dark:text-stone-500 text-sm">
