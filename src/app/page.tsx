@@ -52,6 +52,22 @@ function compressImage(file: File, maxWidth = 1920, quality = 0.85): Promise<Blo
   })
 }
 
+function ThinkingDots() {
+  return (
+    <div className="rounded-2xl rounded-tl-sm bg-white dark:bg-stone-900 border border-stone-100 dark:border-stone-800 px-5 py-4 shadow-sm">
+      <div className="flex gap-1.5 items-center h-4">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="w-2 h-2 rounded-full bg-stone-300 dark:bg-stone-600 animate-bounce"
+            style={{ animationDelay: `${i * 160}ms`, animationDuration: '0.9s' }}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function Home() {
   const [energy, setEnergy] = useState<Energy>('mid')
   const [activeTab, setActiveTab] = useState<Tab>('chat')
@@ -101,7 +117,7 @@ export default function Home() {
   const nextState = useChat({ id: 'next' })
   const activeChat = activeTab === 'next' ? nextState : chatState
 
-  // Waveform draw loop — starts after isRecording becomes true and canvas is mounted
+  // Waveform draw loop
   useEffect(() => {
     if (!isRecording || !analyserRef.current) return
     let frameId: number
@@ -109,24 +125,19 @@ export default function Home() {
       const analyser = analyserRef.current
       const canvas = canvasRef.current
       if (!analyser || !canvas) { frameId = requestAnimationFrame(draw); return }
-
       const dpr = window.devicePixelRatio || 1
       const cw = canvas.clientWidth * dpr
       const ch = canvas.clientHeight * dpr
       if (canvas.width !== cw) canvas.width = cw
       if (canvas.height !== ch) canvas.height = ch
-
       const ctx = canvas.getContext('2d')
       if (!ctx) return
       ctx.clearRect(0, 0, cw, ch)
-
       const buf = new Uint8Array(analyser.frequencyBinCount)
       analyser.getByteFrequencyData(buf)
-
       const bars = 32
       const bw = Math.max(2, Math.floor(cw / bars * 0.45))
       const spacing = (cw - bars * bw) / (bars + 1)
-
       for (let i = 0; i < bars; i++) {
         const v = buf[Math.floor(i * analyser.frequencyBinCount / bars)] / 255
         const bh = Math.max(3 * dpr, v * ch * 0.92)
@@ -254,8 +265,6 @@ export default function Home() {
     if (!SR) return
     finalTextRef.current = ''
     setLiveTranscript('')
-
-    // Audio visualisation — best-effort, falls back gracefully if denied
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
       audioStreamRef.current = stream
@@ -265,10 +274,7 @@ export default function Home() {
       analyser.fftSize = 256
       analyserRef.current = analyser
       audioCtx.createMediaStreamSource(stream).connect(analyser)
-    } catch {
-      // Visualisation unavailable; transcription still works
-    }
-
+    } catch {}
     const recognition = new SR()
     recognition.continuous = true
     recognition.interimResults = true
@@ -296,13 +302,11 @@ export default function Home() {
     setIsRecording(false)
     recognitionRef.current?.stop()
     recognitionRef.current = null
-    // Tear down audio
     audioStreamRef.current?.getTracks().forEach(t => t.stop())
     audioContextRef.current?.close()
     audioStreamRef.current = null
     audioContextRef.current = null
     analyserRef.current = null
-    // Append transcript to inbox
     const text = finalTextRef.current.trim()
     if (text) {
       setInboxContent(prev => {
@@ -377,9 +381,7 @@ export default function Home() {
             )}
             {activeChat.messages.map((m) => <MessageCard key={m.id} message={m} />)}
             {activeChat.isLoading && activeChat.messages[activeChat.messages.length - 1]?.role === 'user' && (
-              <div className="rounded-2xl rounded-tl-sm bg-white dark:bg-stone-900 border border-stone-100 dark:border-stone-800 px-5 py-4 shadow-sm">
-                <span className="text-stone-300 dark:text-stone-600 text-sm animate-pulse">···</span>
-              </div>
+              <ThinkingDots />
             )}
             <div ref={messagesEndRef} />
           </main>
@@ -432,16 +434,6 @@ export default function Home() {
                 </>
               ) : (
                 <>
-                  {/* Photo */}
-                  <button
-                    onClick={() => photoInputRef.current?.click()}
-                    disabled={photoUploading}
-                    aria-label="Add photo"
-                    className="text-base text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 disabled:opacity-40 transition-colors leading-none"
-                  >
-                    {photoUploading ? <span className="text-xs animate-pulse">…</span> : <>&#128247;</>}
-                  </button>
-                  <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
                   <button
                     onClick={() => { setInboxEditValue(inboxContent ?? ''); setInboxEditing(true) }}
                     className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
@@ -454,9 +446,9 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Scrollable content — bottom padding leaves room for floating mic */}
+          {/* Scrollable content */}
           <div className="flex-1 overflow-y-auto">
-            <div className={!inboxEditing ? 'pb-28' : ''}>
+            <div className={!inboxEditing ? 'pb-32' : ''}>
               {inboxLoading ? (
                 <p className="px-4 py-4 text-stone-400 dark:text-stone-500 text-sm animate-pulse">Loading…</p>
               ) : inboxEditing ? (
@@ -504,7 +496,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* ── Floating mic ── */}
+          {/* ── Floating mic + photo ── */}
           {!inboxEditing && (
             <div className="absolute bottom-0 inset-x-0 flex flex-col items-center pb-4 pointer-events-none z-10">
               {/* Live transcript card */}
@@ -524,35 +516,54 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Mic button */}
-              <div className="relative pointer-events-auto">
-                {isRecording && (
-                  <div className="absolute inset-0 rounded-full bg-red-500/40 animate-ping" />
-                )}
+              {/* Buttons row: photo + mic side by side */}
+              <div className="flex items-center gap-5 pointer-events-auto">
+                {/* Photo button */}
                 <button
-                  onClick={isRecording ? stopRecording : startRecording}
-                  aria-label={isRecording ? 'Stop recording' : 'Start voice note'}
-                  className={`relative w-14 h-14 rounded-full flex items-center justify-center shadow-xl transition-all duration-200 ${
-                    isRecording
-                      ? 'bg-red-500 scale-110'
-                      : 'bg-stone-800 dark:bg-stone-700 hover:bg-stone-700 dark:hover:bg-stone-600'
-                  }`}
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={photoUploading}
+                  aria-label="Add photo"
+                  className="w-10 h-10 rounded-full bg-stone-700 dark:bg-stone-600 flex items-center justify-center shadow-lg hover:bg-stone-600 dark:hover:bg-stone-500 disabled:opacity-40 transition-colors"
                 >
-                  {isRecording ? (
-                    // Stop square
-                    <svg viewBox="0 0 24 24" fill="white" className="w-5 h-5">
-                      <rect x="6" y="6" width="12" height="12" rx="2" />
-                    </svg>
+                  {photoUploading ? (
+                    <span className="text-white text-xs animate-pulse">…</span>
                   ) : (
-                    // Mic
-                    <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-                      <rect x="9" y="2" width="6" height="11" rx="3" />
-                      <path d="M5 10a7 7 0 0 0 14 0" />
-                      <line x1="12" y1="19" x2="12" y2="22" />
-                      <line x1="8" y1="22" x2="16" y2="22" />
+                    <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4.5 h-4.5">
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                      <circle cx="12" cy="13" r="4" />
                     </svg>
                   )}
                 </button>
+                <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
+
+                {/* Mic button */}
+                <div className="relative">
+                  {isRecording && (
+                    <div className="absolute inset-0 rounded-full bg-red-500/40 animate-ping" />
+                  )}
+                  <button
+                    onClick={isRecording ? stopRecording : startRecording}
+                    aria-label={isRecording ? 'Stop recording' : 'Start voice note'}
+                    className={`relative w-14 h-14 rounded-full flex items-center justify-center shadow-xl transition-all duration-200 ${
+                      isRecording
+                        ? 'bg-red-500 scale-110'
+                        : 'bg-stone-800 dark:bg-stone-700 hover:bg-stone-700 dark:hover:bg-stone-600'
+                    }`}
+                  >
+                    {isRecording ? (
+                      <svg viewBox="0 0 24 24" fill="white" className="w-5 h-5">
+                        <rect x="6" y="6" width="12" height="12" rx="2" />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                        <rect x="9" y="2" width="6" height="11" rx="3" />
+                        <path d="M5 10a7 7 0 0 0 14 0" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                        <line x1="8" y1="22" x2="16" y2="22" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
               </div>
 
               {isRecording && (

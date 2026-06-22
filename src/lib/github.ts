@@ -51,6 +51,28 @@ export async function getFile(path: string): Promise<GitHubFile | null> {
   return { content, sha: data.sha }
 }
 
+// Returns the raw base64 content of a file (no UTF-8 decode).
+// Use for binary files like images.
+export async function getFileBase64(path: string): Promise<string | null> {
+  const { token, repo, branch } = config()
+  if (!token || !repo) throw new Error('GitHub not configured')
+
+  const url = `${API}/repos/${repo}/contents/${encodeURIComponent(path).replace(/%2F/g, '/')}?ref=${encodeURIComponent(branch)}`
+  const res = await fetch(url, {
+    headers: headers(token),
+    cache: 'no-store',
+  })
+
+  if (res.status === 404) return null
+  if (!res.ok) {
+    throw new Error(`GitHub read failed (${res.status}): ${await res.text()}`)
+  }
+
+  const data = await res.json()
+  // GitHub wraps content in base64 with newlines; strip them.
+  return (data.content as string).replace(/\n/g, '')
+}
+
 // Creates or updates a file. Pass the current sha to update; omit to create.
 // Returns the new commit sha.
 export async function putFile(
