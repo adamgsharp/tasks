@@ -446,6 +446,13 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Description strip */}
+          {!inboxEditing && (
+            <p className="px-4 py-2.5 text-xs text-stone-400 dark:text-stone-500 border-b border-stone-100 dark:border-stone-800 leading-relaxed flex-shrink-0">
+              Dump anything here — a sentence, a ramble, a photo. If you’re at your desk, run /inbox to clear it, or /next or /today to fold it into your plan.
+            </p>
+          )}
+
           {/* Scrollable content */}
           <div className="flex-1 overflow-y-auto">
             <div className={!inboxEditing ? 'pb-32' : ''}>
@@ -523,12 +530,12 @@ export default function Home() {
                   onClick={() => photoInputRef.current?.click()}
                   disabled={photoUploading}
                   aria-label="Add photo"
-                  className="w-10 h-10 rounded-full bg-stone-700 dark:bg-stone-600 flex items-center justify-center shadow-lg hover:bg-stone-600 dark:hover:bg-stone-500 disabled:opacity-40 transition-colors"
+                  className="w-14 h-14 rounded-full bg-stone-800 dark:bg-stone-700 flex items-center justify-center shadow-xl hover:bg-stone-700 dark:hover:bg-stone-600 disabled:opacity-40 transition-colors"
                 >
                   {photoUploading ? (
                     <span className="text-white text-xs animate-pulse">…</span>
                   ) : (
-                    <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4.5 h-4.5">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
                       <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                       <circle cx="12" cy="13" r="4" />
                     </svg>
