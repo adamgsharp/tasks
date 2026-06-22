@@ -10,7 +10,7 @@ type Tab = 'chat' | 'next' | 'inbox' | 'todo'
 
 const TAB_LABELS: Record<Tab, string> = {
   chat: 'Chat',
-  next: '/next',
+  next: 'Next',
   inbox: 'Inbox',
   todo: 'To Do',
 }
