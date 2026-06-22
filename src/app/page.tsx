@@ -33,11 +33,6 @@ function toggleCheckboxInContent(content: string, checkboxIndex: number, current
   return lines.join('\n')
 }
 
-function isCheckboxTarget(e: React.MouseEvent): boolean {
-  const t = e.target as HTMLElement
-  return t.tagName === 'INPUT' && (t as HTMLInputElement).type === 'checkbox'
-}
-
 export default function Home() {
   const [energy, setEnergy] = useState<Energy>('mid')
   const [activeTab, setActiveTab] = useState<Tab>('chat')
@@ -54,6 +49,17 @@ export default function Home() {
   const [todoEditing, setTodoEditing] = useState(false)
   const [todoEditValue, setTodoEditValue] = useState('')
   const [todoSaving, setTodoSaving] = useState(false)
+
+  // Mic state
+  const [isRecording, setIsRecording] = useState(false)
+  const [liveTranscript, setLiveTranscript] = useState('')
+  const isRecordingRef = useRef(false)
+  const finalTextRef = useRef('')
+  const recognitionRef = useRef<any>(null)
+
+  // Photo state
+  const [photoUploading, setPhotoUploading] = useState(false)
+  const photoInputRef = useRef<HTMLInputElement>(null)
 
   const energyRef = useRef(energy)
   const activeTabRef = useRef(activeTab)
@@ -192,6 +198,84 @@ export default function Home() {
     await saveFile('todo', newContent)
   }
 
+  const startRecording = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SR) return
+    finalTextRef.current = ''
+    setLiveTranscript('')
+    const recognition = new SR()
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = 'en-US'
+    recognition.onresult = (e: any) => {
+      let interim = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          finalTextRef.current += e.results[i][0].transcript + ' '
+        } else {
+          interim = e.results[i][0].transcript
+        }
+      }
+      setLiveTranscript(finalTextRef.current + interim)
+    }
+    recognition.onend = () => {
+      if (isRecordingRef.current) {
+        try { recognition.start() } catch {}
+      }
+    }
+    recognition.onerror = (e: any) => {
+      if (e.error !== 'aborted') {
+        isRecordingRef.current = false
+        setIsRecording(false)
+      }
+    }
+    recognition.start()
+    recognitionRef.current = recognition
+    isRecordingRef.current = true
+    setIsRecording(true)
+  }
+
+  const stopRecording = () => {
+    isRecordingRef.current = false
+    setIsRecording(false)
+    recognitionRef.current?.stop()
+    recognitionRef.current = null
+    const text = finalTextRef.current.trim()
+    if (text) {
+      setInboxContent(prev => {
+        const base = (prev ?? '').trimEnd()
+        const newContent = base ? base + '\n- ' + text : '- ' + text
+        saveFile('inbox', newContent)
+        return newContent
+      })
+    }
+    setLiveTranscript('')
+    finalTextRef.current = ''
+  }
+
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setPhotoUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/upload', { method: 'POST', body: formData })
+      const data = await res.json()
+      if (data.obsidianLink) {
+        setInboxContent(prev => {
+          const base = (prev ?? '').trimEnd()
+          const newContent = base ? base + '\n' + data.obsidianLink : data.obsidianLink
+          saveFile('inbox', newContent)
+          return newContent
+        })
+      }
+    } finally {
+      setPhotoUploading(false)
+    }
+  }
+
   const ingestInbox = () => {
     setActiveTab('chat')
     chatState.append(
@@ -206,11 +290,7 @@ export default function Home() {
     chatState.append(
       {
         role: 'user',
-        content: `Archive the current To Do list and clean it up:
-1. Read the \`created:\` date from frontmatter in the To Do content you have. Format it as M-DD-YY (e.g. 2026-06-18 → 6-18-26).
-2. Write the full current To Do content to \`To Do/Archived/To Do Lists/To Do - [dated name].md\` using save_file_at_path.
-3. Rewrite To Do.md using save_brain_file: keep all incomplete [ ] tasks in their sections, remove all completed [x] tasks, and set \`created: ${today}\` in the frontmatter.
-4. Briefly confirm what was archived and what was removed.`,
+        content: `Archive the current To Do list and clean it up:\n1. Read the \`created:\` date from frontmatter in the To Do content you have. Format it as M-DD-YY (e.g. 2026-06-18 → 6-18-26).\n2. Write the full current To Do content to \`To Do/Archived/To Do Lists/To Do - [dated name].md\` using save_file_at_path.\n3. Rewrite To Do.md using save_brain_file: keep all incomplete [ ] tasks in their sections, remove all completed [x] tasks, and set \`created: ${today}\` in the frontmatter.\n4. Briefly confirm what was archived and what was removed.`,
       },
       { body: { energy: energyRef.current, mode: 'chat' } },
     )
@@ -281,6 +361,7 @@ export default function Home() {
 
       {activeTab === 'inbox' && (
         <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Toolbar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-100 dark:border-stone-800 flex-shrink-0">
             <button
               onClick={ingestInbox}
@@ -298,12 +379,66 @@ export default function Home() {
                 </>
               ) : (
                 <>
-                  <button onClick={() => { setInboxEditValue(inboxContent ?? ''); setInboxEditing(true) }} className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors">Edit</button>
+                  {/* Mic button */}
+                  {isRecording ? (
+                    <button
+                      onClick={stopRecording}
+                      className="flex items-center gap-1.5 text-xs font-medium text-red-500 dark:text-red-400 border border-red-300 dark:border-red-700 rounded-lg px-3 py-1.5 transition-colors"
+                    >
+                      <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                      Stop
+                    </button>
+                  ) : (
+                    <button
+                      onClick={startRecording}
+                      aria-label="Record"
+                      className="text-base text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors leading-none"
+                    >
+                      &#127908;
+                    </button>
+                  )}
+                  {/* Photo button */}
+                  <button
+                    onClick={() => photoInputRef.current?.click()}
+                    disabled={photoUploading}
+                    aria-label="Add photo"
+                    className="text-base text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 disabled:opacity-40 transition-colors leading-none"
+                  >
+                    {photoUploading ? (
+                      <span className="text-xs animate-pulse">…</span>
+                    ) : (
+                      <>&#128247;</>
+                    )}
+                  </button>
+                  <input
+                    ref={photoInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handlePhotoSelect}
+                  />
+                  <button
+                    onClick={() => { setInboxEditValue(inboxContent ?? ''); setInboxEditing(true) }}
+                    className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
+                  >
+                    Edit
+                  </button>
                   <button onClick={loadInbox} aria-label="Refresh" className="text-sm text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors">↻</button>
                 </>
               )}
             </div>
           </div>
+
+          {/* Live transcript preview */}
+          {isRecording && (
+            <div className="px-4 py-3 bg-red-50 dark:bg-red-950/30 border-b border-red-100 dark:border-red-900 flex-shrink-0">
+              <p className="text-xs text-red-400 dark:text-red-500 font-medium mb-1">Listening…</p>
+              <p className="text-sm text-stone-700 dark:text-stone-300 min-h-[1.25rem]">
+                {liveTranscript || <span className="text-stone-400 dark:text-stone-500 italic">Start speaking</span>}
+              </p>
+            </div>
+          )}
+
           <div className="flex-1 overflow-y-auto">
             {inboxLoading ? (
               <p className="px-4 py-4 text-stone-400 dark:text-stone-500 text-sm animate-pulse">Loading…</p>
