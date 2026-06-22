@@ -446,13 +446,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Description strip */}
-          {!inboxEditing && (
-            <p className="px-4 py-2.5 text-xs text-stone-400 dark:text-stone-500 border-b border-stone-100 dark:border-stone-800 leading-relaxed flex-shrink-0">
-              Dump anything here — a sentence, a ramble, a photo. If you’re at your desk, run /inbox to clear it, or /next or /today to fold it into your plan.
-            </p>
-          )}
-
           {/* Scrollable content */}
           <div className="flex-1 overflow-y-auto">
             <div className={!inboxEditing ? 'pb-32' : ''}>
