@@ -331,8 +331,11 @@ export default function Home() {
                               <input
                                 type="checkbox"
                                 checked={!!checked}
-                                onChange={() => handleInboxCheckbox(currentIdx, !!checked)}
-                                onClick={(e) => e.stopPropagation()}
+                                onChange={() => {}}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleInboxCheckbox(currentIdx, !!checked)
+                                }}
                                 className="h-4 w-4 rounded border-stone-300 dark:border-stone-600 cursor-pointer"
                               />
                             )
@@ -403,8 +406,11 @@ export default function Home() {
                               <input
                                 type="checkbox"
                                 checked={!!checked}
-                                onChange={() => handleTodoCheckbox(currentIdx, !!checked)}
-                                onClick={(e) => e.stopPropagation()}
+                                onChange={() => {}}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleTodoCheckbox(currentIdx, !!checked)
+                                }}
                                 className="h-4 w-4 rounded border-stone-300 dark:border-stone-600 cursor-pointer"
                               />
                             )
