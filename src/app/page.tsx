@@ -33,7 +33,7 @@ function toggleCheckboxInContent(content: string, checkboxIndex: number, current
   return lines.join('\n')
 }
 
-function compressImage(file: File, maxWidth = 1920, quality = 0.85): Promise<Blob> {
+function compressImage(file: File, maxWidth = 1200, quality = 0.72): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     const url = URL.createObjectURL(file)

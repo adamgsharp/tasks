@@ -53,6 +53,7 @@ export async function getFile(path: string): Promise<GitHubFile | null> {
 
 // Returns the raw base64 content of a file (no UTF-8 decode).
 // Use for binary files like images.
+// Falls back to the Git Blobs API for files >1MB that the Contents API won't inline.
 export async function getFileBase64(path: string): Promise<string | null> {
   const { token, repo, branch } = config()
   if (!token || !repo) throw new Error('GitHub not configured')
@@ -69,8 +70,26 @@ export async function getFileBase64(path: string): Promise<string | null> {
   }
 
   const data = await res.json()
-  // GitHub wraps content in base64 with newlines; strip them.
-  return (data.content as string).replace(/\n/g, '')
+
+  // Small files (<1MB): Contents API returns base64 content directly.
+  if (data.content && data.encoding === 'base64') {
+    return (data.content as string).replace(/\n/g, '')
+  }
+
+  // Large files (>1MB): Contents API omits content; use the Git Blobs API instead.
+  if (data.sha) {
+    const blobRes = await fetch(`${API}/repos/${repo}/git/blobs/${data.sha}`, {
+      headers: headers(token),
+      cache: 'no-store',
+    })
+    if (!blobRes.ok) {
+      throw new Error(`Git blob fetch failed (${blobRes.status}): ${await blobRes.text()}`)
+    }
+    const blob = await blobRes.json()
+    return (blob.content as string).replace(/\n/g, '')
+  }
+
+  return null
 }
 
 // Creates or updates a file. Pass the current sha to update; omit to create.
