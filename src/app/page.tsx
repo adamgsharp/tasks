@@ -52,6 +52,24 @@ function compressImage(file: File, maxWidth = 1200, quality = 0.72): Promise<Blo
   })
 }
 
+// Convert Obsidian wikilink syntax to standard markdown that ReactMarkdown understands.
+// ![[Photos/x.jpg]] → standard img tag via the vault-image proxy
+// [[Note Name]]      → obsidian:// deep link that opens the note in the app
+function processObsidianLinks(content: string): string {
+  // Images first so the wikilink pass doesn't double-process them
+  let out = content.replace(
+    /!\[\[([^\]]+\.(?:jpg|jpeg|png|gif|webp))\]\]/gi,
+    (_, p) => `![]( /api/vault-image?path=${encodeURIComponent(p)})`
+  )
+  // [[Note|Alias]] and [[Note]] — negative lookbehind skips ![[...]] that remain
+  out = out.replace(/(?<!!)\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, note, alias) => {
+    const display = (alias ?? note).trim()
+    const url = `obsidian://open?file=${encodeURIComponent(note.trim())}`
+    return `[${display}](${url})`
+  })
+  return out
+}
+
 function ThinkingDots() {
   return (
     <div className="rounded-2xl rounded-tl-sm bg-white dark:bg-stone-900 border border-stone-100 dark:border-stone-800 px-5 py-4 shadow-sm">
@@ -66,6 +84,44 @@ function ThinkingDots() {
       </div>
     </div>
   )
+}
+
+const mdComponents = (onCheckbox: (idx: number, checked: boolean) => void) => {
+  let idx = 0
+  return {
+    input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+      const { type, checked } = props
+      if (type !== 'checkbox') return <input {...props} />
+      const currentIdx = idx++
+      return (
+        <input
+          type="checkbox"
+          checked={!!checked}
+          onChange={() => {}}
+          onClick={(e) => { e.stopPropagation(); onCheckbox(currentIdx, !!checked) }}
+          className="h-4 w-4 rounded border-stone-300 dark:border-stone-600 cursor-pointer"
+        />
+      )
+    },
+    img({ src, alt }: React.ImgHTMLAttributes<HTMLImageElement>) {
+      if (!src) return null
+      return (
+        <img
+          src={src.trim()}
+          alt={alt ?? ''}
+          className="rounded-xl my-2 object-contain max-h-48"
+          style={{ maxWidth: '100%' }}
+        />
+      )
+    },
+    a({ href, children }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+      return (
+        <a href={href} target="_blank" rel="noopener noreferrer" className="text-stone-600 dark:text-stone-400 underline underline-offset-2">
+          {children}
+        </a>
+      )
+    },
+  }
 }
 
 export default function Home() {
@@ -461,34 +517,14 @@ export default function Home() {
                 />
               ) : inboxContent ? (
                 <div className="px-4 py-4">
-                  {(() => {
-                    let idx = 0
-                    return (
-                      <div className="prose prose-sm dark:prose-invert max-w-none">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            input(props) {
-                              const { type, checked } = props
-                              if (type !== 'checkbox') return <input {...props} />
-                              const currentIdx = idx++
-                              return (
-                                <input
-                                  type="checkbox"
-                                  checked={!!checked}
-                                  onChange={() => {}}
-                                  onClick={(e) => { e.stopPropagation(); handleInboxCheckbox(currentIdx, !!checked) }}
-                                  className="h-4 w-4 rounded border-stone-300 dark:border-stone-600 cursor-pointer"
-                                />
-                              )
-                            },
-                          }}
-                        >
-                          {inboxContent}
-                        </ReactMarkdown>
-                      </div>
-                    )
-                  })()}
+                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={mdComponents(handleInboxCheckbox) as any}
+                    >
+                      {processObsidianLinks(inboxContent)}
+                    </ReactMarkdown>
+                  </div>
                 </div>
               ) : (
                 <p className="px-4 py-4 text-stone-400 dark:text-stone-500 text-sm">Inbox is empty.</p>
@@ -613,34 +649,14 @@ export default function Home() {
               />
             ) : todoContent ? (
               <div className="px-4 py-4">
-                {(() => {
-                  let idx = 0
-                  return (
-                    <div className="prose prose-sm dark:prose-invert max-w-none">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          input(props) {
-                            const { type, checked } = props
-                            if (type !== 'checkbox') return <input {...props} />
-                            const currentIdx = idx++
-                            return (
-                              <input
-                                type="checkbox"
-                                checked={!!checked}
-                                onChange={() => {}}
-                                onClick={(e) => { e.stopPropagation(); handleTodoCheckbox(currentIdx, !!checked) }}
-                                className="h-4 w-4 rounded border-stone-300 dark:border-stone-600 cursor-pointer"
-                              />
-                            )
-                          },
-                        }}
-                      >
-                        {todoContent}
-                      </ReactMarkdown>
-                    </div>
-                  )
-                })()}
+                <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={mdComponents(handleTodoCheckbox) as any}
+                  >
+                    {processObsidianLinks(todoContent)}
+                  </ReactMarkdown>
+                </div>
               </div>
             ) : (
               <p className="px-4 py-4 text-stone-400 dark:text-stone-500 text-sm">Nothing here.</p>
