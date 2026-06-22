@@ -59,7 +59,7 @@ function processObsidianLinks(content: string): string {
   // Images first so the wikilink pass doesn't double-process them
   let out = content.replace(
     /!\[\[([^\]]+\.(?:jpg|jpeg|png|gif|webp))\]\]/gi,
-    (_, p) => `![]( /api/vault-image?path=${encodeURIComponent(p)})`
+    (_, p) => `![](/api/vault-image?path=${encodeURIComponent(p)})`
   )
   // [[Note|Alias]] and [[Note]] — negative lookbehind skips ![[...]] that remain
   out = out.replace(/(?<!!)\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, note, alias) => {
@@ -115,8 +115,14 @@ const mdComponents = (onCheckbox: (idx: number, checked: boolean) => void) => {
       )
     },
     a({ href, children }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+      const isHttp = href?.startsWith('http')
       return (
-        <a href={href} target="_blank" rel="noopener noreferrer" className="text-stone-600 dark:text-stone-400 underline underline-offset-2">
+        <a
+          href={href}
+          target={isHttp ? '_blank' : '_self'}
+          rel={isHttp ? 'noopener noreferrer' : undefined}
+          className="text-stone-600 dark:text-stone-400 underline underline-offset-2"
+        >
           {children}
         </a>
       )
