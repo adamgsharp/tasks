@@ -33,6 +33,25 @@ function toggleCheckboxInContent(content: string, checkboxIndex: number, current
   return lines.join('\n')
 }
 
+function compressImage(file: File, maxWidth = 1920, quality = 0.85): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const scale = Math.min(1, maxWidth / img.width)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(img.width * scale)
+      canvas.height = Math.round(img.height * scale)
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Compression failed')), 'image/jpeg', quality)
+    }
+    img.onerror = reject
+    img.src = url
+  })
+}
+
 export default function Home() {
   const [energy, setEnergy] = useState<Energy>('mid')
   const [activeTab, setActiveTab] = useState<Tab>('chat')
@@ -50,14 +69,20 @@ export default function Home() {
   const [todoEditValue, setTodoEditValue] = useState('')
   const [todoSaving, setTodoSaving] = useState(false)
 
-  // Mic state
+  // Mic / transcription
   const [isRecording, setIsRecording] = useState(false)
   const [liveTranscript, setLiveTranscript] = useState('')
   const isRecordingRef = useRef(false)
   const finalTextRef = useRef('')
   const recognitionRef = useRef<any>(null)
 
-  // Photo state
+  // Audio visualisation
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const audioStreamRef = useRef<MediaStream | null>(null)
+
+  // Photo upload
   const [photoUploading, setPhotoUploading] = useState(false)
   const photoInputRef = useRef<HTMLInputElement>(null)
 
@@ -74,16 +99,52 @@ export default function Home() {
 
   const chatState = useChat({ id: 'chat' })
   const nextState = useChat({ id: 'next' })
-
   const activeChat = activeTab === 'next' ? nextState : chatState
+
+  // Waveform draw loop — starts after isRecording becomes true and canvas is mounted
+  useEffect(() => {
+    if (!isRecording || !analyserRef.current) return
+    let frameId: number
+    const draw = () => {
+      const analyser = analyserRef.current
+      const canvas = canvasRef.current
+      if (!analyser || !canvas) { frameId = requestAnimationFrame(draw); return }
+
+      const dpr = window.devicePixelRatio || 1
+      const cw = canvas.clientWidth * dpr
+      const ch = canvas.clientHeight * dpr
+      if (canvas.width !== cw) canvas.width = cw
+      if (canvas.height !== ch) canvas.height = ch
+
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.clearRect(0, 0, cw, ch)
+
+      const buf = new Uint8Array(analyser.frequencyBinCount)
+      analyser.getByteFrequencyData(buf)
+
+      const bars = 32
+      const bw = Math.max(2, Math.floor(cw / bars * 0.45))
+      const spacing = (cw - bars * bw) / (bars + 1)
+
+      for (let i = 0; i < bars; i++) {
+        const v = buf[Math.floor(i * analyser.frequencyBinCount / bars)] / 255
+        const bh = Math.max(3 * dpr, v * ch * 0.92)
+        const x = spacing + i * (bw + spacing)
+        const y = (ch - bh) / 2
+        ctx.fillStyle = `rgba(239,68,68,${0.35 + v * 0.65})`
+        ctx.fillRect(x, y, bw, bh)
+      }
+      frameId = requestAnimationFrame(draw)
+    }
+    frameId = requestAnimationFrame(draw)
+    return () => cancelAnimationFrame(frameId)
+  }, [isRecording])
 
   useEffect(() => {
     if (activeTab === 'next' && nextState.messages.length === 0 && !nextFired.current && !nextState.isLoading) {
       nextFired.current = true
-      nextState.append(
-        { role: 'user', content: '/next' },
-        { body: { energy: energyRef.current, mode: 'next' } },
-      )
+      nextState.append({ role: 'user', content: '/next' }, { body: { energy: energyRef.current, mode: 'next' } })
     }
   }, [activeTab, nextState.messages.length, nextState.isLoading])
 
@@ -111,19 +172,12 @@ export default function Home() {
       if (vv.offsetTop > 0) requestAnimationFrame(() => window.scrollTo(0, 0))
       const kb = Math.max(0, window.innerHeight - vv.height)
       setKbHeight(kb)
-      if (kb > 0) {
-        setTimeout(() => {
-          if (mainRef.current) mainRef.current.scrollTop = mainRef.current.scrollHeight
-        }, 50)
-      }
+      if (kb > 0) setTimeout(() => { if (mainRef.current) mainRef.current.scrollTop = mainRef.current.scrollHeight }, 50)
     }
     update()
     vv.addEventListener('resize', update)
     vv.addEventListener('scroll', update)
-    return () => {
-      vv.removeEventListener('resize', update)
-      vv.removeEventListener('scroll', update)
-    }
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
   }, [])
 
   const resizeTextarea = () => {
@@ -137,10 +191,7 @@ export default function Home() {
     const text = activeChat.input.trim()
     if (!text || activeChat.isLoading) return
     const mode = activeTabRef.current === 'next' ? 'next' : 'chat'
-    activeChat.append(
-      { role: 'user', content: text },
-      { body: { energy: energyRef.current, mode } },
-    )
+    activeChat.append({ role: 'user', content: text }, { body: { energy: energyRef.current, mode } })
     activeChat.setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
@@ -198,11 +249,26 @@ export default function Home() {
     await saveFile('todo', newContent)
   }
 
-  const startRecording = () => {
+  const startRecording = async () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SR) return
     finalTextRef.current = ''
     setLiveTranscript('')
+
+    // Audio visualisation — best-effort, falls back gracefully if denied
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      audioStreamRef.current = stream
+      const audioCtx = new AudioContext()
+      audioContextRef.current = audioCtx
+      const analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 256
+      analyserRef.current = analyser
+      audioCtx.createMediaStreamSource(stream).connect(analyser)
+    } catch {
+      // Visualisation unavailable; transcription still works
+    }
+
     const recognition = new SR()
     recognition.continuous = true
     recognition.interimResults = true
@@ -210,24 +276,14 @@ export default function Home() {
     recognition.onresult = (e: any) => {
       let interim = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) {
-          finalTextRef.current += e.results[i][0].transcript + ' '
-        } else {
-          interim = e.results[i][0].transcript
-        }
+        if (e.results[i].isFinal) finalTextRef.current += e.results[i][0].transcript + ' '
+        else interim = e.results[i][0].transcript
       }
       setLiveTranscript(finalTextRef.current + interim)
     }
-    recognition.onend = () => {
-      if (isRecordingRef.current) {
-        try { recognition.start() } catch {}
-      }
-    }
+    recognition.onend = () => { if (isRecordingRef.current) try { recognition.start() } catch {} }
     recognition.onerror = (e: any) => {
-      if (e.error !== 'aborted') {
-        isRecordingRef.current = false
-        setIsRecording(false)
-      }
+      if (e.error !== 'aborted') { isRecordingRef.current = false; setIsRecording(false) }
     }
     recognition.start()
     recognitionRef.current = recognition
@@ -240,13 +296,20 @@ export default function Home() {
     setIsRecording(false)
     recognitionRef.current?.stop()
     recognitionRef.current = null
+    // Tear down audio
+    audioStreamRef.current?.getTracks().forEach(t => t.stop())
+    audioContextRef.current?.close()
+    audioStreamRef.current = null
+    audioContextRef.current = null
+    analyserRef.current = null
+    // Append transcript to inbox
     const text = finalTextRef.current.trim()
     if (text) {
       setInboxContent(prev => {
         const base = (prev ?? '').trimEnd()
-        const newContent = base ? base + '\n- ' + text : '- ' + text
-        saveFile('inbox', newContent)
-        return newContent
+        const next = base ? base + '\n- ' + text : '- ' + text
+        saveFile('inbox', next)
+        return next
       })
     }
     setLiveTranscript('')
@@ -259,16 +322,17 @@ export default function Home() {
     e.target.value = ''
     setPhotoUploading(true)
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      const res = await fetch('/api/upload', { method: 'POST', body: formData })
+      const compressed = await compressImage(file)
+      const fd = new FormData()
+      fd.append('file', compressed, file.name.replace(/\.[^.]+$/, '.jpg'))
+      const res = await fetch('/api/upload', { method: 'POST', body: fd })
       const data = await res.json()
       if (data.obsidianLink) {
         setInboxContent(prev => {
           const base = (prev ?? '').trimEnd()
-          const newContent = base ? base + '\n' + data.obsidianLink : data.obsidianLink
-          saveFile('inbox', newContent)
-          return newContent
+          const next = base ? base + '\n' + data.obsidianLink : data.obsidianLink
+          saveFile('inbox', next)
+          return next
         })
       }
     } finally {
@@ -278,20 +342,14 @@ export default function Home() {
 
   const ingestInbox = () => {
     setActiveTab('chat')
-    chatState.append(
-      { role: 'user', content: '/triage' },
-      { body: { energy: energyRef.current, mode: 'triage' } },
-    )
+    chatState.append({ role: 'user', content: '/triage' }, { body: { energy: energyRef.current, mode: 'triage' } })
   }
 
   const cleanUpAndArchive = () => {
     setActiveTab('chat')
     const today = new Date().toISOString().slice(0, 10)
     chatState.append(
-      {
-        role: 'user',
-        content: `Archive the current To Do list and clean it up:\n1. Read the \`created:\` date from frontmatter in the To Do content you have. Format it as M-DD-YY (e.g. 2026-06-18 → 6-18-26).\n2. Write the full current To Do content to \`To Do/Archived/To Do Lists/To Do - [dated name].md\` using save_file_at_path.\n3. Rewrite To Do.md using save_brain_file: keep all incomplete [ ] tasks in their sections, remove all completed [x] tasks, and set \`created: ${today}\` in the frontmatter.\n4. Briefly confirm what was archived and what was removed.`,
-      },
+      { role: 'user', content: `Archive the current To Do list and clean it up:\n1. Read the \`created:\` date from frontmatter in the To Do content you have. Format it as M-DD-YY (e.g. 2026-06-18 → 6-18-26).\n2. Write the full current To Do content to \`To Do/Archived/To Do Lists/To Do - [dated name].md\` using save_file_at_path.\n3. Rewrite To Do.md using save_brain_file: keep all incomplete [ ] tasks in their sections, remove all completed [x] tasks, and set \`created: ${today}\` in the frontmatter.\n4. Briefly confirm what was archived and what was removed.` },
       { body: { energy: energyRef.current, mode: 'chat' } },
     )
   }
@@ -302,12 +360,11 @@ export default function Home() {
     <div ref={containerRef} className="fixed top-0 inset-x-0 flex flex-col max-w-lg mx-auto" style={{ height: '100svh' }}>
 
       <header className="flex items-center justify-between px-4 pt-safe border-b border-stone-100 dark:border-stone-800 py-3 flex-shrink-0">
-        <span className="text-stone-600 dark:text-stone-400 font-medium tracking-tight select-none">
-          tasks
-        </span>
+        <span className="text-stone-600 dark:text-stone-400 font-medium tracking-tight select-none">tasks</span>
         <EngineCheck energy={energy} onChange={setEnergy} />
       </header>
 
+      {/* ── Chat / Next ── */}
       {isChatTab && (
         <>
           <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
@@ -318,9 +375,7 @@ export default function Home() {
                 </p>
               </div>
             )}
-            {activeChat.messages.map((m) => (
-              <MessageCard key={m.id} message={m} />
-            ))}
+            {activeChat.messages.map((m) => <MessageCard key={m.id} message={m} />)}
             {activeChat.isLoading && activeChat.messages[activeChat.messages.length - 1]?.role === 'user' && (
               <div className="rounded-2xl rounded-tl-sm bg-white dark:bg-stone-900 border border-stone-100 dark:border-stone-800 px-5 py-4 shadow-sm">
                 <span className="text-stone-300 dark:text-stone-600 text-sm animate-pulse">···</span>
@@ -328,7 +383,6 @@ export default function Home() {
             )}
             <div ref={messagesEndRef} />
           </main>
-
           <footer
             className="border-t border-stone-100 dark:border-stone-800 px-4 pt-3 flex-shrink-0"
             style={{ paddingBottom: kbHeight > 0 ? '8px' : 'max(env(safe-area-inset-bottom, 12px), 12px)' }}
@@ -342,9 +396,7 @@ export default function Home() {
                 className="flex-1 resize-none rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2.5 text-stone-800 dark:text-stone-200 placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-300 dark:focus:ring-stone-600 transition-shadow"
                 style={{ fontSize: '16px' }}
                 onChange={(e) => { activeChat.setInput(e.target.value); resizeTextarea() }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
-                }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
               />
               <button
                 onClick={submit}
@@ -359,8 +411,9 @@ export default function Home() {
         </>
       )}
 
+      {/* ── Inbox ── */}
       {activeTab === 'inbox' && (
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden relative">
           {/* Toolbar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-100 dark:border-stone-800 flex-shrink-0">
             <button
@@ -379,44 +432,16 @@ export default function Home() {
                 </>
               ) : (
                 <>
-                  {/* Mic button */}
-                  {isRecording ? (
-                    <button
-                      onClick={stopRecording}
-                      className="flex items-center gap-1.5 text-xs font-medium text-red-500 dark:text-red-400 border border-red-300 dark:border-red-700 rounded-lg px-3 py-1.5 transition-colors"
-                    >
-                      <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                      Stop
-                    </button>
-                  ) : (
-                    <button
-                      onClick={startRecording}
-                      aria-label="Record"
-                      className="text-base text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors leading-none"
-                    >
-                      &#127908;
-                    </button>
-                  )}
-                  {/* Photo button */}
+                  {/* Photo */}
                   <button
                     onClick={() => photoInputRef.current?.click()}
                     disabled={photoUploading}
                     aria-label="Add photo"
                     className="text-base text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 disabled:opacity-40 transition-colors leading-none"
                   >
-                    {photoUploading ? (
-                      <span className="text-xs animate-pulse">…</span>
-                    ) : (
-                      <>&#128247;</>
-                    )}
+                    {photoUploading ? <span className="text-xs animate-pulse">…</span> : <>&#128247;</>}
                   </button>
-                  <input
-                    ref={photoInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handlePhotoSelect}
-                  />
+                  <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
                   <button
                     onClick={() => { setInboxEditValue(inboxContent ?? ''); setInboxEditing(true) }}
                     className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
@@ -429,68 +454,116 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Live transcript preview */}
-          {isRecording && (
-            <div className="px-4 py-3 bg-red-50 dark:bg-red-950/30 border-b border-red-100 dark:border-red-900 flex-shrink-0">
-              <p className="text-xs text-red-400 dark:text-red-500 font-medium mb-1">Listening…</p>
-              <p className="text-sm text-stone-700 dark:text-stone-300 min-h-[1.25rem]">
-                {liveTranscript || <span className="text-stone-400 dark:text-stone-500 italic">Start speaking</span>}
-              </p>
+          {/* Scrollable content — bottom padding leaves room for floating mic */}
+          <div className="flex-1 overflow-y-auto">
+            <div className={!inboxEditing ? 'pb-28' : ''}>
+              {inboxLoading ? (
+                <p className="px-4 py-4 text-stone-400 dark:text-stone-500 text-sm animate-pulse">Loading…</p>
+              ) : inboxEditing ? (
+                <textarea
+                  value={inboxEditValue}
+                  onChange={(e) => setInboxEditValue(e.target.value)}
+                  autoFocus
+                  className="w-full resize-none bg-transparent px-4 py-4 text-stone-700 dark:text-stone-300 font-mono focus:outline-none leading-relaxed"
+                  style={{ fontSize: '16px', minHeight: '100%' }}
+                />
+              ) : inboxContent ? (
+                <div className="px-4 py-4">
+                  {(() => {
+                    let idx = 0
+                    return (
+                      <div className="prose prose-sm dark:prose-invert max-w-none">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            input(props) {
+                              const { type, checked } = props
+                              if (type !== 'checkbox') return <input {...props} />
+                              const currentIdx = idx++
+                              return (
+                                <input
+                                  type="checkbox"
+                                  checked={!!checked}
+                                  onChange={() => {}}
+                                  onClick={(e) => { e.stopPropagation(); handleInboxCheckbox(currentIdx, !!checked) }}
+                                  className="h-4 w-4 rounded border-stone-300 dark:border-stone-600 cursor-pointer"
+                                />
+                              )
+                            },
+                          }}
+                        >
+                          {inboxContent}
+                        </ReactMarkdown>
+                      </div>
+                    )
+                  })()}
+                </div>
+              ) : (
+                <p className="px-4 py-4 text-stone-400 dark:text-stone-500 text-sm">Inbox is empty.</p>
+              )}
+            </div>
+          </div>
+
+          {/* ── Floating mic ── */}
+          {!inboxEditing && (
+            <div className="absolute bottom-0 inset-x-0 flex flex-col items-center pb-4 pointer-events-none z-10">
+              {/* Live transcript card */}
+              {isRecording && (
+                <div className="pointer-events-auto mb-3 mx-6 max-w-xs w-full bg-stone-900/95 dark:bg-stone-950/95 backdrop-blur-md rounded-2xl px-4 py-3 shadow-2xl">
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-red-400 mb-1.5">Listening</p>
+                  <p className="text-sm text-white leading-relaxed min-h-[1.25rem]">
+                    {liveTranscript || <span className="text-stone-500 italic">Start speaking…</span>}
+                  </p>
+                </div>
+              )}
+
+              {/* Waveform canvas */}
+              {isRecording && (
+                <div className="w-52 h-10 mb-2">
+                  <canvas ref={canvasRef} className="w-full h-full" />
+                </div>
+              )}
+
+              {/* Mic button */}
+              <div className="relative pointer-events-auto">
+                {isRecording && (
+                  <div className="absolute inset-0 rounded-full bg-red-500/40 animate-ping" />
+                )}
+                <button
+                  onClick={isRecording ? stopRecording : startRecording}
+                  aria-label={isRecording ? 'Stop recording' : 'Start voice note'}
+                  className={`relative w-14 h-14 rounded-full flex items-center justify-center shadow-xl transition-all duration-200 ${
+                    isRecording
+                      ? 'bg-red-500 scale-110'
+                      : 'bg-stone-800 dark:bg-stone-700 hover:bg-stone-700 dark:hover:bg-stone-600'
+                  }`}
+                >
+                  {isRecording ? (
+                    // Stop square
+                    <svg viewBox="0 0 24 24" fill="white" className="w-5 h-5">
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    </svg>
+                  ) : (
+                    // Mic
+                    <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                      <rect x="9" y="2" width="6" height="11" rx="3" />
+                      <path d="M5 10a7 7 0 0 0 14 0" />
+                      <line x1="12" y1="19" x2="12" y2="22" />
+                      <line x1="8" y1="22" x2="16" y2="22" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+
+              {isRecording && (
+                <p className="text-[11px] text-red-400 mt-1.5 font-medium pointer-events-none">Tap to save &amp; stop</p>
+              )}
             </div>
           )}
-
-          <div className="flex-1 overflow-y-auto">
-            {inboxLoading ? (
-              <p className="px-4 py-4 text-stone-400 dark:text-stone-500 text-sm animate-pulse">Loading…</p>
-            ) : inboxEditing ? (
-              <textarea
-                value={inboxEditValue}
-                onChange={(e) => setInboxEditValue(e.target.value)}
-                autoFocus
-                className="w-full h-full resize-none bg-transparent px-4 py-4 text-stone-700 dark:text-stone-300 font-mono focus:outline-none leading-relaxed"
-                style={{ fontSize: '16px' }}
-              />
-            ) : inboxContent ? (
-              <div className="px-4 py-4">
-                {(() => {
-                  let idx = 0
-                  return (
-                    <div className="prose prose-sm dark:prose-invert max-w-none">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          input(props) {
-                            const { type, checked } = props
-                            if (type !== 'checkbox') return <input {...props} />
-                            const currentIdx = idx++
-                            return (
-                              <input
-                                type="checkbox"
-                                checked={!!checked}
-                                onChange={() => {}}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleInboxCheckbox(currentIdx, !!checked)
-                                }}
-                                className="h-4 w-4 rounded border-stone-300 dark:border-stone-600 cursor-pointer"
-                              />
-                            )
-                          },
-                        }}
-                      >
-                        {inboxContent}
-                      </ReactMarkdown>
-                    </div>
-                  )
-                })()}
-              </div>
-            ) : (
-              <p className="px-4 py-4 text-stone-400 dark:text-stone-500 text-sm">Inbox is empty.</p>
-            )}
-          </div>
         </div>
       )}
 
+      {/* ── To Do ── */}
       {activeTab === 'todo' && (
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-100 dark:border-stone-800 gap-3 flex-shrink-0">
@@ -545,10 +618,7 @@ export default function Home() {
                                 type="checkbox"
                                 checked={!!checked}
                                 onChange={() => {}}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleTodoCheckbox(currentIdx, !!checked)
-                                }}
+                                onClick={(e) => { e.stopPropagation(); handleTodoCheckbox(currentIdx, !!checked) }}
                                 className="h-4 w-4 rounded border-stone-300 dark:border-stone-600 cursor-pointer"
                               />
                             )
@@ -568,6 +638,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* Tab bar */}
       <div
         className="flex border-t border-stone-100 dark:border-stone-800 flex-shrink-0"
         style={{ paddingBottom: kbHeight > 0 ? '0px' : 'env(safe-area-inset-bottom, 0px)' }}
