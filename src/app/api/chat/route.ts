@@ -86,7 +86,10 @@ export async function POST(req: Request) {
 
         read_vault_file: tool({
           description:
-            'Read any file from the vault repository. When you see an image reference like ![[Photos/...]] in brain files, call this tool with that path to view the actual image. Also works for reading any other vault file by path.',
+            'Fetch a file from the vault. For images (![[Photos/...]]), this returns the actual pixel data so you can see the photo. ' +
+            'CRITICAL: You must call this tool before describing any image — never guess or infer what a photo shows. ' +
+            'If the result contains ok:false or an error field, tell the user the image could not be loaded and ask them to describe it. ' +
+            'Do not describe, infer, or fabricate image content under any circumstances if the load fails.',
           parameters: z.object({
             path: z.string().describe('Vault file path, e.g. "Photos/inbox-20260622043324.jpeg"'),
           }),
@@ -95,13 +98,17 @@ export async function POST(req: Request) {
               const ext = path.split('.').pop()?.toLowerCase() ?? ''
               if (IMAGE_EXTS.has(ext)) {
                 const b64 = await getFileBase64(path)
-                if (!b64) return { ok: false, error: 'File not found' }
+                if (!b64) {
+                  return {
+                    ok: false,
+                    error: 'IMAGE_NOT_FOUND: The image file does not exist in the vault. Tell the user you cannot see it and ask them to describe what it showed.',
+                  }
+                }
                 return {
-                  content: [{
-                    type: 'image' as const,
-                    data: b64,
-                    mimeType: imageMime(path),
-                  }],
+                  content: [
+                    { type: 'text' as const, text: 'Image loaded from vault — describe only what you actually see in it:' },
+                    { type: 'image' as const, data: b64, mimeType: imageMime(path) },
+                  ],
                 }
               } else {
                 const file = await getFile(path)
@@ -109,7 +116,10 @@ export async function POST(req: Request) {
                 return { ok: true, content: file.content }
               }
             } catch (err) {
-              return { ok: false, error: err instanceof Error ? err.message : 'read failed' }
+              return {
+                ok: false,
+                error: `IMAGE_LOAD_ERROR: ${err instanceof Error ? err.message : 'read failed'}. Tell the user you cannot see the image and ask them to describe it.`,
+              }
             }
           },
         }),
