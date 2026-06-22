@@ -103,11 +103,11 @@ const mdComponents = (onCheckbox: (idx: number, checked: boolean) => void) => {
         />
       )
     },
-    img({ src, alt }: React.ImgHTMLAttributes<HTMLImageElement>) {
+    img({ src, alt }: { src?: string; alt?: string }) {
       if (!src) return null
       return (
         <img
-          src={src.trim()}
+          src={src}
           alt={alt ?? ''}
           className="rounded-xl my-2 object-contain max-h-48"
           style={{ maxWidth: '100%' }}
