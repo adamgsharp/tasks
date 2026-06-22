@@ -12,6 +12,7 @@ function brainPaths() {
     todo: process.env.BRAIN_TODO_PATH ?? 'brain/To Do.md',
     inbox: process.env.BRAIN_INBOX_PATH ?? 'brain/Inbox.md',
     done: process.env.BRAIN_DONE_PATH ?? 'brain/Done.md',
+    log: process.env.BRAIN_LOG_PATH ?? 'Brain/Usage Log.md',
   }
 }
 
@@ -44,9 +45,6 @@ export async function POST(req: Request) {
     done: paths.done,
   }
 
-  // Build system prompt and (for triage) pre-load inbox photos in parallel.
-  // Injecting photos directly into the message means Claude sees them on the
-  // first pass — no multi-step tool-call round-trip needed.
   const [systemPrompt, inboxFile] = await Promise.all([
     buildSystemPrompt(mode, energy),
     mode === 'triage' && githubConfigured()
@@ -157,16 +155,30 @@ export async function POST(req: Request) {
     tools,
     maxSteps: tools ? 8 : 1,
     maxTokens: 8192,
-    onFinish({ usage, steps }) {
-      const PRICE_IN = 3.00   // $ per 1M input tokens (Sonnet)
-      const PRICE_OUT = 15.00 // $ per 1M output tokens (Sonnet)
+    onFinish: async ({ usage, steps }) => {
+      const PRICE_IN = 3.00
+      const PRICE_OUT = 15.00
       const costUsd = (
         (usage.promptTokens * PRICE_IN + usage.completionTokens * PRICE_OUT) / 1_000_000
       ).toFixed(4)
-      console.log(
-        `[chat] mode=${mode} model=${model} steps=${steps.length} photos=${photoCount}` +
+
+      const line =
+        `mode=${mode} model=${model} steps=${steps.length} photos=${photoCount}` +
         ` in=${usage.promptTokens} out=${usage.completionTokens} total=${usage.totalTokens} cost=$${costUsd}`
-      )
+      console.log(`[chat] ${line}`)
+
+      if (!githubConfigured()) return
+      try {
+        const now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC'
+        const entry = `- ${now} | ${line}`
+        const existing = await getFile(paths.log)
+        const newContent = existing
+          ? existing.content.trimEnd() + '\n' + entry
+          : `# Usage Log\n\n${entry}`
+        await putFile(paths.log, newContent, 'tasks: log api usage', existing?.sha)
+      } catch {
+        // Never let logging errors propagate
+      }
     },
   })
 
