@@ -5,6 +5,7 @@ import { buildSystemPrompt } from '@/lib/brain'
 import { getFile, getFileBase64, putFile, githubConfigured } from '@/lib/github'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 
 function brainPaths() {
   return {
@@ -41,6 +42,46 @@ export async function POST(req: Request) {
     todo: paths.todo,
     inbox: paths.inbox,
     done: paths.done,
+  }
+
+  // Build system prompt and (for triage) pre-load inbox photos in parallel.
+  // Injecting photos directly into the message means Claude sees them on the
+  // first pass — no multi-step tool-call round-trip needed.
+  const [systemPrompt, inboxFile] = await Promise.all([
+    buildSystemPrompt(mode, energy),
+    mode === 'triage' && githubConfigured()
+      ? getFile(paths.inbox).catch(() => null)
+      : Promise.resolve(null),
+  ])
+
+  let processedMessages = messages
+  if (inboxFile) {
+    const photoMatches = [...inboxFile.content.matchAll(/!\[\[([^\]]+\.(?:jpg|jpeg|png|gif|webp))\]\]/gi)]
+    const photos = (
+      await Promise.all(
+        photoMatches.map(async ([, photoPath]) => {
+          const b64 = await getFileBase64(photoPath).catch(() => null)
+          if (!b64) return null
+          return {
+            type: 'image' as const,
+            image: Buffer.from(b64, 'base64'),
+            mimeType: imageMime(photoPath),
+          }
+        }),
+      )
+    ).filter((p): p is NonNullable<typeof p> => p !== null)
+
+    if (photos.length > 0) {
+      const lastMsg = messages[messages.length - 1]
+      const lastContent =
+        typeof lastMsg.content === 'string'
+          ? [{ type: 'text' as const, text: lastMsg.content }]
+          : (lastMsg.content as Array<{ type: string }>)
+      processedMessages = [
+        ...messages.slice(0, -1),
+        { ...lastMsg, content: [...lastContent, ...photos] },
+      ]
+    }
   }
 
   const tools = canWrite
@@ -86,40 +127,21 @@ export async function POST(req: Request) {
 
         read_vault_file: tool({
           description:
-            'Fetch a file from the vault. For images (![[Photos/...]]), this returns the actual pixel data so you can see the photo. ' +
-            'CRITICAL: You must call this tool before describing any image — never guess or infer what a photo shows. ' +
-            'If the result contains ok:false or an error field, tell the user the image could not be loaded and ask them to describe it. ' +
-            'Do not describe, infer, or fabricate image content under any circumstances if the load fails.',
+            'Fetch a text file from the vault (markdown notes, etc). For images, photos are already pre-loaded into context — do not call this tool for image paths.',
           parameters: z.object({
-            path: z.string().describe('Vault file path, e.g. "Photos/inbox-20260622043324.jpeg"'),
+            path: z.string().describe('Vault file path, e.g. "Projects/MyNote.md"'),
           }),
           execute: async ({ path }) => {
             try {
               const ext = path.split('.').pop()?.toLowerCase() ?? ''
               if (IMAGE_EXTS.has(ext)) {
-                const b64 = await getFileBase64(path)
-                if (!b64) {
-                  return {
-                    ok: false,
-                    error: 'IMAGE_NOT_FOUND: The image file does not exist in the vault. Tell the user you cannot see it and ask them to describe what it showed.',
-                  }
-                }
-                return {
-                  content: [
-                    { type: 'text' as const, text: 'Image loaded from vault — describe only what you actually see in it:' },
-                    { type: 'image' as const, data: b64, mimeType: imageMime(path) },
-                  ],
-                }
-              } else {
-                const file = await getFile(path)
-                if (!file) return { ok: false, error: 'File not found' }
-                return { ok: true, content: file.content }
+                return { ok: false, error: 'Photos are pre-loaded into context. Describe what you see in the image that was provided.' }
               }
+              const file = await getFile(path)
+              if (!file) return { ok: false, error: 'File not found' }
+              return { ok: true, content: file.content }
             } catch (err) {
-              return {
-                ok: false,
-                error: `IMAGE_LOAD_ERROR: ${err instanceof Error ? err.message : 'read failed'}. Tell the user you cannot see the image and ask them to describe it.`,
-              }
+              return { ok: false, error: err instanceof Error ? err.message : 'read failed' }
             }
           },
         }),
@@ -128,8 +150,8 @@ export async function POST(req: Request) {
 
   const result = streamText({
     model: anthropic(model),
-    system: await buildSystemPrompt(mode, energy),
-    messages,
+    system: systemPrompt,
+    messages: processedMessages,
     tools,
     maxSteps: tools ? 8 : 1,
     maxTokens: 8192,
