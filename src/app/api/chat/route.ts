@@ -55,6 +55,7 @@ export async function POST(req: Request) {
   ])
 
   let processedMessages = messages
+  let photoCount = 0
   if (inboxFile) {
     const photoMatches = [...inboxFile.content.matchAll(/!\[\[([^\]]+\.(?:jpg|jpeg|png|gif|webp))\]\]/gi)]
     const photos = (
@@ -72,6 +73,7 @@ export async function POST(req: Request) {
     ).filter((p): p is NonNullable<typeof p> => p !== null)
 
     if (photos.length > 0) {
+      photoCount = photos.length
       const lastMsg = messages[messages.length - 1]
       const lastContent =
         typeof lastMsg.content === 'string'
@@ -155,6 +157,17 @@ export async function POST(req: Request) {
     tools,
     maxSteps: tools ? 8 : 1,
     maxTokens: 8192,
+    onFinish({ usage, steps }) {
+      const PRICE_IN = 3.00   // $ per 1M input tokens (Sonnet)
+      const PRICE_OUT = 15.00 // $ per 1M output tokens (Sonnet)
+      const costUsd = (
+        (usage.promptTokens * PRICE_IN + usage.completionTokens * PRICE_OUT) / 1_000_000
+      ).toFixed(4)
+      console.log(
+        `[chat] mode=${mode} model=${model} steps=${steps.length} photos=${photoCount}` +
+        ` in=${usage.promptTokens} out=${usage.completionTokens} total=${usage.totalTokens} cost=$${costUsd}`
+      )
+    },
   })
 
   return result.toDataStreamResponse()
