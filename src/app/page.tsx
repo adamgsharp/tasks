@@ -20,11 +20,11 @@ function toggleCheckboxInContent(content: string, checkboxIndex: number, current
   const lines = content.split('\n')
   let count = 0
   for (let i = 0; i < lines.length; i++) {
-    if (/- \[[ xX]\]/.test(lines[i])) {
+    if (/^\s*(?:-|\d+\.)\s+\[[ xX]\]/.test(lines[i])) {
       if (count === checkboxIndex) {
         lines[i] = currentlyChecked
-          ? lines[i].replace(/- \[[xX]\]/, '- [ ]')
-          : lines[i].replace('- [ ]', '- [x]')
+          ? lines[i].replace(/\[[xX]\]/, '[ ]')
+          : lines[i].replace('[ ]', '[x]')
         break
       }
       count++
@@ -66,7 +66,6 @@ export default function Home() {
 
   const activeChat = activeTab === 'next' ? nextState : chatState
 
-  // Auto-fire /next on first visit when Next tab has no history
   useEffect(() => {
     if (activeTab === 'next' && nextState.messages.length === 0 && !nextFired.current && !nextState.isLoading) {
       nextFired.current = true
@@ -77,7 +76,6 @@ export default function Home() {
     }
   }, [activeTab, nextState.messages.length, nextState.isLoading])
 
-  // Load file tabs on first open
   useEffect(() => {
     if (activeTab === 'inbox' && inboxContent === null && !inboxLoading) loadInbox()
   }, [activeTab])
@@ -86,7 +84,6 @@ export default function Home() {
     if (activeTab === 'todo' && todoContent === null && !todoLoading) loadTodo()
   }, [activeTab])
 
-  // Reset textarea height when switching tabs
   useEffect(() => {
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }, [activeTab])
@@ -95,7 +92,6 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [activeChat.messages])
 
-  // Pin container to visual viewport height to keep input above keyboard on iOS
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
@@ -220,7 +216,6 @@ export default function Home() {
   return (
     <div ref={containerRef} className="fixed top-0 inset-x-0 flex flex-col max-w-lg mx-auto" style={{ height: '100svh' }}>
 
-      {/* Header */}
       <header className="flex items-center justify-between px-4 pt-safe border-b border-stone-100 dark:border-stone-800 py-3 flex-shrink-0">
         <span className="text-stone-600 dark:text-stone-400 font-medium tracking-tight select-none">
           tasks
@@ -228,7 +223,6 @@ export default function Home() {
         <EngineCheck energy={energy} onChange={setEnergy} />
       </header>
 
-      {/* Chat / Next tab content */}
       {isChatTab && (
         <>
           <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
@@ -280,7 +274,6 @@ export default function Home() {
         </>
       )}
 
-      {/* Inbox tab content */}
       {activeTab === 'inbox' && (
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-100 dark:border-stone-800 flex-shrink-0">
@@ -355,7 +348,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* To Do tab content */}
       {activeTab === 'todo' && (
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-100 dark:border-stone-800 gap-3 flex-shrink-0">
@@ -430,7 +422,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* Tab bar */}
       <div
         className="flex border-t border-stone-100 dark:border-stone-800 flex-shrink-0"
         style={{ paddingBottom: kbHeight > 0 ? '0px' : 'env(safe-area-inset-bottom, 0px)' }}
