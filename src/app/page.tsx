@@ -6,21 +6,37 @@ import ReactMarkdown from 'react-markdown'
 import EngineCheck, { type Energy } from '@/components/EngineCheck'
 import MessageCard from '@/components/MessageCard'
 
+type Tab = 'chat' | 'next' | 'inbox' | 'todo'
+
+const TAB_LABELS: Record<Tab, string> = {
+  chat: 'Chat',
+  next: '/next',
+  inbox: 'Inbox',
+  todo: 'To Do',
+}
+
 export default function Home() {
   const [energy, setEnergy] = useState<Energy>('mid')
-  const [mode, setMode] = useState<'inbox' | 'triage' | 'next' | 'chat'>('chat')
+  const [activeTab, setActiveTab] = useState<Tab>('chat')
   const [kbHeight, setKbHeight] = useState(0)
-  const [showTodo, setShowTodo] = useState(false)
-  const [todoContent, setTodoContent] = useState<string | null>(null)
-  const [todoLoading, setTodoLoading] = useState(false)
-  const [showInbox, setShowInbox] = useState(false)
+
   const [inboxContent, setInboxContent] = useState<string | null>(null)
   const [inboxLoading, setInboxLoading] = useState(false)
+  const [inboxEditing, setInboxEditing] = useState(false)
+  const [inboxEditValue, setInboxEditValue] = useState('')
+  const [inboxSaving, setInboxSaving] = useState(false)
+
+  const [todoContent, setTodoContent] = useState<string | null>(null)
+  const [todoLoading, setTodoLoading] = useState(false)
+  const [todoEditing, setTodoEditing] = useState(false)
+  const [todoEditValue, setTodoEditValue] = useState('')
+  const [todoSaving, setTodoSaving] = useState(false)
 
   const energyRef = useRef(energy)
-  const modeRef = useRef(mode)
+  const activeTabRef = useRef(activeTab)
+  const nextFired = useRef(false)
   useEffect(() => { energyRef.current = energy }, [energy])
-  useEffect(() => { modeRef.current = mode }, [mode])
+  useEffect(() => { activeTabRef.current = activeTab }, [activeTab])
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const mainRef = useRef<HTMLDivElement>(null)
@@ -28,29 +44,40 @@ export default function Home() {
   const containerRef = useRef<HTMLDivElement>(null)
 
   const { messages, input, setInput, isLoading, append } = useChat({
-    body: { energy: energyRef.current, mode: modeRef.current },
+    body: { energy: energyRef.current, mode: 'chat' },
   })
+
+  // Auto-fire /next on first visit when there's no chat history yet
+  useEffect(() => {
+    if (activeTab === 'next' && messages.length === 0 && !nextFired.current && !isLoading) {
+      nextFired.current = true
+      append(
+        { role: 'user', content: '/next' },
+        { body: { energy: energyRef.current, mode: 'next' } },
+      )
+    }
+  }, [activeTab, messages.length, isLoading])
+
+  // Load file tabs on first open
+  useEffect(() => {
+    if (activeTab === 'inbox' && inboxContent === null && !inboxLoading) loadInbox()
+  }, [activeTab])
+
+  useEffect(() => {
+    if (activeTab === 'todo' && todoContent === null && !todoLoading) loadTodo()
+  }, [activeTab])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Pin container height to the visual viewport so it always ends just above
-  // the keyboard. On every vv.resize/scroll:
-  //  1. Set container height = vv.height (correct end-state regardless of animation frame)
-  //  2. If iOS scrolled the page to reveal the textarea (vv.offsetTop > 0), undo
-  //     it via requestAnimationFrame — deferred so we don't cancel mid-animation
-  //     keyboard resize events the way a synchronous scrollTo did.
-  //  3. Scroll the messages container directly (not scrollIntoView, which on iOS
-  //     can aggressively scroll the window and fight the viewport reset).
+  // Pin container to visual viewport height to keep input above keyboard on iOS
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
     const update = () => {
       if (containerRef.current) containerRef.current.style.height = `${vv.height}px`
-      if (vv.offsetTop > 0) {
-        requestAnimationFrame(() => window.scrollTo(0, 0))
-      }
+      if (vv.offsetTop > 0) requestAnimationFrame(() => window.scrollTo(0, 0))
       const kb = Math.max(0, window.innerHeight - vv.height)
       setKbHeight(kb)
       if (kb > 0) {
@@ -78,102 +105,181 @@ export default function Home() {
   const submit = () => {
     const text = input.trim()
     if (!text || isLoading) return
+    const mode = activeTabRef.current === 'next' ? 'next' : 'chat'
     append(
       { role: 'user', content: text },
-      { body: { energy: energyRef.current, mode: modeRef.current } },
+      { body: { energy: energyRef.current, mode } },
     )
     setInput('')
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-    }
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
-  const triggerNext = () => {
-    if (isLoading) return
-    setMode('next')
-    append(
-      { role: 'user', content: '/next' },
-      { body: { energy: energyRef.current, mode: 'next' } },
-    )
-  }
-
-  const activateInbox = () => {
-    setMode('inbox')
-    textareaRef.current?.focus()
-  }
-
-  const openTodo = async () => {
-    setShowTodo(true)
-    setTodoLoading(true)
-    setTodoContent(null)
-    const res = await fetch('/api/brain?file=todo')
-    const data = await res.json()
-    setTodoContent(data.content)
-    setTodoLoading(false)
-  }
-
-  const openInbox = async () => {
-    setShowInbox(true)
+  const loadInbox = async () => {
     setInboxLoading(true)
-    setInboxContent(null)
     const res = await fetch('/api/brain?file=inbox')
     const data = await res.json()
     setInboxContent(data.content)
     setInboxLoading(false)
   }
 
-  const triggerTriage = () => {
-    if (isLoading) return
-    setMode('triage')
+  const loadTodo = async () => {
+    setTodoLoading(true)
+    const res = await fetch('/api/brain?file=todo')
+    const data = await res.json()
+    setTodoContent(data.content)
+    setTodoLoading(false)
+  }
+
+  const saveFile = async (file: 'inbox' | 'todo', content: string) => {
+    const res = await fetch('/api/brain', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file, content }),
+    })
+    return res.ok
+  }
+
+  const saveInbox = async () => {
+    setInboxSaving(true)
+    const ok = await saveFile('inbox', inboxEditValue)
+    if (ok) { setInboxContent(inboxEditValue); setInboxEditing(false) }
+    setInboxSaving(false)
+  }
+
+  const saveTodo = async () => {
+    setTodoSaving(true)
+    const ok = await saveFile('todo', todoEditValue)
+    if (ok) { setTodoContent(todoEditValue); setTodoEditing(false) }
+    setTodoSaving(false)
+  }
+
+  const ingestInbox = () => {
+    setActiveTab('chat')
     append(
       { role: 'user', content: '/triage' },
       { body: { energy: energyRef.current, mode: 'triage' } },
     )
   }
 
+  const isChatTab = activeTab === 'chat' || activeTab === 'next'
+
   return (
     <div ref={containerRef} className="fixed top-0 inset-x-0 flex flex-col max-w-lg mx-auto" style={{ height: '100svh' }}>
-      {showTodo && (
-        <div className="absolute inset-0 z-10 flex flex-col bg-stone-50 dark:bg-stone-950">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100 dark:border-stone-800">
-            <span className="text-sm font-medium text-stone-600 dark:text-stone-400">To Do</span>
-            <button
-              onClick={() => setShowTodo(false)}
-              aria-label="Close"
-              className="text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300 transition-colors"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto px-4 py-4">
-            {todoLoading ? (
-              <p className="text-stone-400 dark:text-stone-500 text-sm animate-pulse">Loading…</p>
-            ) : todoContent ? (
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown>{todoContent}</ReactMarkdown>
+
+      {/* Header */}
+      <header className="flex items-center justify-between px-4 pt-safe border-b border-stone-100 dark:border-stone-800 py-3 flex-shrink-0">
+        <span className="text-stone-600 dark:text-stone-400 font-medium tracking-tight select-none">
+          tasks
+        </span>
+        <EngineCheck energy={energy} onChange={setEnergy} />
+      </header>
+
+      {/* Chat / Next tab content */}
+      {isChatTab && (
+        <>
+          <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
+            {messages.length === 0 && !isLoading && (
+              <div className="flex items-center justify-center h-full select-none">
+                <p className="text-stone-400 dark:text-stone-500 text-sm">
+                  {activeTab === 'next' ? 'Getting your next thing…' : "What's on your mind?"}
+                </p>
               </div>
-            ) : (
-              <p className="text-stone-400 dark:text-stone-500 text-sm">Nothing here.</p>
             )}
-          </div>
-        </div>
+            {messages.map((m) => (
+              <MessageCard key={m.id} message={m} />
+            ))}
+            {isLoading && messages[messages.length - 1]?.role === 'user' && (
+              <div className="rounded-2xl rounded-tl-sm bg-white dark:bg-stone-900 border border-stone-100 dark:border-stone-800 px-5 py-4 shadow-sm">
+                <span className="text-stone-300 dark:text-stone-600 text-sm animate-pulse">···</span>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </main>
+
+          <footer
+            className="border-t border-stone-100 dark:border-stone-800 px-4 pt-3 flex-shrink-0"
+            style={{ paddingBottom: kbHeight > 0 ? '8px' : 'max(env(safe-area-inset-bottom, 12px), 12px)' }}
+          >
+            <div className="flex gap-2 items-end">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                placeholder="What's on your mind?"
+                rows={1}
+                className="flex-1 resize-none rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2.5 text-base text-stone-800 dark:text-stone-200 placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-300 dark:focus:ring-stone-600 transition-shadow"
+                onChange={(e) => { setInput(e.target.value); resizeTextarea() }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
+                }}
+              />
+              <button
+                onClick={submit}
+                disabled={isLoading || !input.trim()}
+                aria-label="Send"
+                className="rounded-xl bg-stone-800 dark:bg-stone-200 text-stone-50 dark:text-stone-900 w-10 h-10 flex items-center justify-center text-base font-medium disabled:opacity-25 hover:bg-stone-700 dark:hover:bg-stone-300 transition-colors flex-shrink-0"
+              >
+                {isLoading ? '·' : '↑'}
+              </button>
+            </div>
+          </footer>
+        </>
       )}
 
-      {showInbox && (
-        <div className="absolute inset-0 z-10 flex flex-col bg-stone-50 dark:bg-stone-950">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100 dark:border-stone-800">
-            <span className="text-sm font-medium text-stone-600 dark:text-stone-400">Inbox</span>
+      {/* Inbox tab content */}
+      {activeTab === 'inbox' && (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-100 dark:border-stone-800 flex-shrink-0">
             <button
-              onClick={() => setShowInbox(false)}
-              aria-label="Close"
-              className="text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300 transition-colors"
+              onClick={ingestInbox}
+              className="text-xs font-medium text-stone-500 dark:text-stone-400 border border-stone-200 dark:border-stone-700 rounded-lg px-3 py-1.5 hover:border-stone-400 dark:hover:border-stone-500 hover:text-stone-700 dark:hover:text-stone-200 transition-colors"
             >
-              ✕
+              Ingest Inbox
             </button>
+            <div className="flex items-center gap-3">
+              {inboxEditing ? (
+                <>
+                  <button
+                    onClick={() => setInboxEditing(false)}
+                    className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveInbox}
+                    disabled={inboxSaving}
+                    className="text-xs font-medium text-stone-600 dark:text-stone-300 border border-stone-300 dark:border-stone-600 rounded-lg px-3 py-1.5 hover:border-stone-500 dark:hover:border-stone-400 disabled:opacity-40 transition-colors"
+                  >
+                    {inboxSaving ? 'Saving…' : 'Save'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={loadInbox}
+                    aria-label="Refresh"
+                    className="text-sm text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
+                  >
+                    ↻
+                  </button>
+                  <button
+                    onClick={() => { setInboxEditValue(inboxContent ?? ''); setInboxEditing(true) }}
+                    className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
+                  >
+                    Edit
+                  </button>
+                </>
+              )}
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto px-4 py-4">
             {inboxLoading ? (
               <p className="text-stone-400 dark:text-stone-500 text-sm animate-pulse">Loading…</p>
+            ) : inboxEditing ? (
+              <textarea
+                value={inboxEditValue}
+                onChange={(e) => setInboxEditValue(e.target.value)}
+                className="w-full h-full resize-none bg-transparent text-sm text-stone-700 dark:text-stone-300 font-mono focus:outline-none leading-relaxed"
+              />
             ) : inboxContent ? (
               <div className="prose prose-sm dark:prose-invert max-w-none">
                 <ReactMarkdown>{inboxContent}</ReactMarkdown>
@@ -185,136 +291,83 @@ export default function Home() {
         </div>
       )}
 
-      {/* Header */}
-      <header className="flex items-center justify-between px-4 pt-safe border-b border-stone-100 dark:border-stone-800 py-3">
-        <span className="text-stone-600 dark:text-stone-400 font-medium tracking-tight select-none">
-          tasks
-        </span>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={openInbox}
-            className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors select-none"
-          >
-            inbox
-          </button>
-          <button
-            onClick={openTodo}
-            className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors select-none"
-          >
-            todo
-          </button>
+      {/* To Do tab content */}
+      {activeTab === 'todo' && (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex items-center justify-end px-4 py-2.5 border-b border-stone-100 dark:border-stone-800 gap-3 flex-shrink-0">
+            {todoEditing ? (
+              <>
+                <button
+                  onClick={() => setTodoEditing(false)}
+                  className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveTodo}
+                  disabled={todoSaving}
+                  className="text-xs font-medium text-stone-600 dark:text-stone-300 border border-stone-300 dark:border-stone-600 rounded-lg px-3 py-1.5 hover:border-stone-500 dark:hover:border-stone-400 disabled:opacity-40 transition-colors"
+                >
+                  {todoSaving ? 'Saving…' : 'Save'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={loadTodo}
+                  aria-label="Refresh"
+                  className="text-sm text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
+                >
+                  ↻
+                </button>
+                <button
+                  onClick={() => { setTodoEditValue(todoContent ?? ''); setTodoEditing(true) }}
+                  className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
+                >
+                  Edit
+                </button>
+              </>
+            )}
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            {todoLoading ? (
+              <p className="text-stone-400 dark:text-stone-500 text-sm animate-pulse">Loading…</p>
+            ) : todoEditing ? (
+              <textarea
+                value={todoEditValue}
+                onChange={(e) => setTodoEditValue(e.target.value)}
+                className="w-full h-full resize-none bg-transparent text-sm text-stone-700 dark:text-stone-300 font-mono focus:outline-none leading-relaxed"
+              />
+            ) : todoContent ? (
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <ReactMarkdown>{todoContent}</ReactMarkdown>
+              </div>
+            ) : (
+              <p className="text-stone-400 dark:text-stone-500 text-sm">Nothing here.</p>
+            )}
+          </div>
         </div>
-        <EngineCheck energy={energy} onChange={setEnergy} />
-      </header>
+      )}
 
-      {/* Messages */}
-      <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-center select-none">
-            <p className="text-stone-400 dark:text-stone-500 text-sm">
-              What&apos;s on your mind?
-            </p>
-            <p className="text-stone-300 dark:text-stone-600 text-xs leading-relaxed max-w-[200px]">
-              Dump something to clear it,<br />or tap /next for the right thing now.
-            </p>
-          </div>
-        )}
-
-        {messages.map((m) => (
-          <MessageCard key={m.id} message={m} />
-        ))}
-
-        {isLoading && messages[messages.length - 1]?.role === 'user' && (
-          <div className="rounded-2xl rounded-tl-sm bg-white dark:bg-stone-900 border border-stone-100 dark:border-stone-800 px-5 py-4 shadow-sm">
-            <span className="text-stone-300 dark:text-stone-600 text-sm animate-pulse">···</span>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </main>
-
-      {/* Input area — padding-bottom gives safe-area clearance when keyboard
-          is hidden; a small gap when it's open (container already ends just
-          above the keyboard so no large offset needed). */}
-      <footer
-        className="border-t border-stone-100 dark:border-stone-800 px-4 pt-3 space-y-2.5"
-        style={{ paddingBottom: kbHeight > 0 ? '8px' : 'max(env(safe-area-inset-bottom, 12px), 12px)' }}
+      {/* Tab bar */}
+      <div
+        className="flex border-t border-stone-100 dark:border-stone-800 flex-shrink-0"
+        style={{ paddingBottom: kbHeight > 0 ? '0px' : 'env(safe-area-inset-bottom, 0px)' }}
       >
-        {mode !== 'chat' && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-stone-400 dark:text-stone-500">
-              mode:{' '}
-              <span className="text-stone-600 dark:text-stone-300 font-medium">/{mode}</span>
-            </span>
-            <button
-              onClick={() => setMode('chat')}
-              aria-label="Clear mode"
-              className="text-xs text-stone-300 hover:text-stone-500 dark:text-stone-600 dark:hover:text-stone-400 leading-none"
-            >
-              ✕
-            </button>
-          </div>
-        )}
-
-        <div className="flex gap-2 items-end">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            placeholder={mode === 'inbox' ? "What's the ugh?" : mode === 'triage' ? 'Ready when you are…' : "What's on your mind?"}
-            rows={1}
-            className="flex-1 resize-none rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2.5 text-base text-stone-800 dark:text-stone-200 placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-300 dark:focus:ring-stone-600 transition-shadow"
-            onChange={(e) => {
-              setInput(e.target.value)
-              resizeTextarea()
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                submit()
-              }
-            }}
-          />
+        {(Object.keys(TAB_LABELS) as Tab[]).map((tab) => (
           <button
-            onClick={submit}
-            disabled={isLoading || !input.trim()}
-            aria-label="Send"
-            className="rounded-xl bg-stone-800 dark:bg-stone-200 text-stone-50 dark:text-stone-900 w-10 h-10 flex items-center justify-center text-base font-medium disabled:opacity-25 hover:bg-stone-700 dark:hover:bg-stone-300 transition-colors flex-shrink-0"
-          >
-            {isLoading ? '·' : '↑'}
-          </button>
-        </div>
-
-        <div className="flex gap-2 pb-1">
-          <button
-            onClick={triggerNext}
-            disabled={isLoading}
-            className="flex-1 rounded-lg border border-stone-200 dark:border-stone-700 py-2 text-xs text-stone-500 dark:text-stone-400 hover:border-stone-400 dark:hover:border-stone-500 hover:text-stone-700 dark:hover:text-stone-200 transition-colors disabled:opacity-30"
-          >
-            /next
-          </button>
-          <button
-            onClick={activateInbox}
-            className={`flex-1 rounded-lg border py-2 text-xs transition-colors ${
-              mode === 'inbox'
-                ? 'border-stone-400 dark:border-stone-500 text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800'
-                : 'border-stone-200 dark:border-stone-700 text-stone-500 dark:text-stone-400 hover:border-stone-400 dark:hover:border-stone-500 hover:text-stone-700 dark:hover:text-stone-200'
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`flex-1 py-3 text-xs font-medium transition-colors select-none ${
+              activeTab === tab
+                ? 'text-stone-800 dark:text-stone-100'
+                : 'text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300'
             }`}
           >
-            /inbox
+            {TAB_LABELS[tab]}
           </button>
-          <button
-            onClick={triggerTriage}
-            disabled={isLoading}
-            className={`flex-1 rounded-lg border py-2 text-xs transition-colors ${
-              mode === 'triage'
-                ? 'border-stone-400 dark:border-stone-500 text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800'
-                : 'border-stone-200 dark:border-stone-700 text-stone-500 dark:text-stone-400 hover:border-stone-400 dark:hover:border-stone-500 hover:text-stone-700 dark:hover:text-stone-200 disabled:opacity-30'
-            }`}
-          >
-            /triage
-          </button>
-        </div>
-      </footer>
+        ))}
+      </div>
     </div>
   )
 }

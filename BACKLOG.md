@@ -3,10 +3,6 @@
 ## In Progress
 - [ ] Sync full Obsidian vault to GitHub (user doing manually)
 
-## Up Next
-- [ ] Inbox viewer panel in app (like todo panel)
-- [ ] Two /inbox modes: capture (current) + triage (one-by-one through existing inbox items)
-
 ## On Hold
 - [ ] Desktop version of the app
 
@@ -15,5 +11,9 @@
 - [x] Obsidian vault backed to GitHub (adamgsharp/obsidian)
 - [x] GitHub read/write wired up (GITHUB_TOKEN, GITHUB_REPO, GITHUB_BRANCH)
 - [x] maxTokens fix (1024 → 8192 for full file write-back)
-- [x] Todo panel in app header
-- [x] /api/brain endpoint for reading brain files
+- [x] /api/brain endpoint for reading and writing brain files
+- [x] Tabbed UI: Chat | /next | Inbox | To Do
+- [x] Inbox/To Do tabs: markdown viewer + editor + direct save to GitHub
+- [x] /next auto-fires on first visit
+- [x] Ingest Inbox button → switches to Chat tab + fires triage
+- [x] /triage mode (one-by-one inbox processing)
