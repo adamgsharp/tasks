@@ -61,20 +61,21 @@ export default function Home() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const { messages, input, setInput, isLoading, append } = useChat({
-    body: { energy: energyRef.current, mode: 'chat' },
-  })
+  const chatState = useChat({ id: 'chat' })
+  const nextState = useChat({ id: 'next' })
 
-  // Auto-fire /next on first visit when there's no chat history yet
+  const activeChat = activeTab === 'next' ? nextState : chatState
+
+  // Auto-fire /next on first visit when Next tab has no history
   useEffect(() => {
-    if (activeTab === 'next' && messages.length === 0 && !nextFired.current && !isLoading) {
+    if (activeTab === 'next' && nextState.messages.length === 0 && !nextFired.current && !nextState.isLoading) {
       nextFired.current = true
-      append(
+      nextState.append(
         { role: 'user', content: '/next' },
         { body: { energy: energyRef.current, mode: 'next' } },
       )
     }
-  }, [activeTab, messages.length, isLoading])
+  }, [activeTab, nextState.messages.length, nextState.isLoading])
 
   // Load file tabs on first open
   useEffect(() => {
@@ -85,9 +86,14 @@ export default function Home() {
     if (activeTab === 'todo' && todoContent === null && !todoLoading) loadTodo()
   }, [activeTab])
 
+  // Reset textarea height when switching tabs
+  useEffect(() => {
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
+  }, [activeTab])
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [activeChat.messages])
 
   // Pin container to visual viewport height to keep input above keyboard on iOS
   useEffect(() => {
@@ -121,14 +127,14 @@ export default function Home() {
   }
 
   const submit = () => {
-    const text = input.trim()
-    if (!text || isLoading) return
+    const text = activeChat.input.trim()
+    if (!text || activeChat.isLoading) return
     const mode = activeTabRef.current === 'next' ? 'next' : 'chat'
-    append(
+    activeChat.append(
       { role: 'user', content: text },
       { body: { energy: energyRef.current, mode } },
     )
-    setInput('')
+    activeChat.setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
@@ -187,9 +193,25 @@ export default function Home() {
 
   const ingestInbox = () => {
     setActiveTab('chat')
-    append(
+    chatState.append(
       { role: 'user', content: '/triage' },
       { body: { energy: energyRef.current, mode: 'triage' } },
+    )
+  }
+
+  const cleanUpAndArchive = () => {
+    setActiveTab('chat')
+    const today = new Date().toISOString().slice(0, 10)
+    chatState.append(
+      {
+        role: 'user',
+        content: `Archive the current To Do list and clean it up:
+1. Read the \`created:\` date from frontmatter in the To Do content you have. Format it as M-DD-YY (e.g. 2026-06-18 → 6-18-26).
+2. Write the full current To Do content to \`To Do/Archived/To Do Lists/To Do - [dated name].md\` using save_file_at_path.
+3. Rewrite To Do.md using save_brain_file: keep all incomplete [ ] tasks in their sections, remove all completed [x] tasks, and set \`created: ${today}\` in the frontmatter.
+4. Briefly confirm what was archived and what was removed.`,
+      },
+      { body: { energy: energyRef.current, mode: 'chat' } },
     )
   }
 
@@ -210,17 +232,17 @@ export default function Home() {
       {isChatTab && (
         <>
           <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
-            {messages.length === 0 && !isLoading && (
+            {activeChat.messages.length === 0 && !activeChat.isLoading && (
               <div className="flex items-center justify-center h-full select-none">
                 <p className="text-stone-400 dark:text-stone-500 text-sm">
                   {activeTab === 'next' ? 'Getting your next thing…' : "What's on your mind?"}
                 </p>
               </div>
             )}
-            {messages.map((m) => (
+            {activeChat.messages.map((m) => (
               <MessageCard key={m.id} message={m} />
             ))}
-            {isLoading && messages[messages.length - 1]?.role === 'user' && (
+            {activeChat.isLoading && activeChat.messages[activeChat.messages.length - 1]?.role === 'user' && (
               <div className="rounded-2xl rounded-tl-sm bg-white dark:bg-stone-900 border border-stone-100 dark:border-stone-800 px-5 py-4 shadow-sm">
                 <span className="text-stone-300 dark:text-stone-600 text-sm animate-pulse">···</span>
               </div>
@@ -235,23 +257,23 @@ export default function Home() {
             <div className="flex gap-2 items-end">
               <textarea
                 ref={textareaRef}
-                value={input}
+                value={activeChat.input}
                 placeholder="What's on your mind?"
                 rows={1}
                 className="flex-1 resize-none rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2.5 text-stone-800 dark:text-stone-200 placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-300 dark:focus:ring-stone-600 transition-shadow"
                 style={{ fontSize: '16px' }}
-                onChange={(e) => { setInput(e.target.value); resizeTextarea() }}
+                onChange={(e) => { activeChat.setInput(e.target.value); resizeTextarea() }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
                 }}
               />
               <button
                 onClick={submit}
-                disabled={isLoading || !input.trim()}
+                disabled={activeChat.isLoading || !activeChat.input.trim()}
                 aria-label="Send"
                 className="rounded-xl bg-stone-800 dark:bg-stone-200 text-stone-50 dark:text-stone-900 w-10 h-10 flex items-center justify-center text-base font-medium disabled:opacity-25 hover:bg-stone-700 dark:hover:bg-stone-300 transition-colors flex-shrink-0"
               >
-                {isLoading ? '·' : '↑'}
+                {activeChat.isLoading ? '·' : '↑'}
               </button>
             </div>
           </footer>
@@ -293,10 +315,7 @@ export default function Home() {
                 style={{ fontSize: '16px' }}
               />
             ) : inboxContent ? (
-              <div
-                className="px-4 py-4 cursor-text"
-                onClick={() => { setInboxEditValue(inboxContent); setInboxEditing(true) }}
-              >
+              <div className="px-4 py-4 cursor-text" onClick={() => { setInboxEditValue(inboxContent); setInboxEditing(true) }}>
                 {(() => {
                   let idx = 0
                   return (
@@ -336,17 +355,25 @@ export default function Home() {
       {/* To Do tab content */}
       {activeTab === 'todo' && (
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex items-center justify-end px-4 py-2.5 border-b border-stone-100 dark:border-stone-800 gap-3 flex-shrink-0">
-            {todoEditing ? (
-              <>
-                <button onClick={() => setTodoEditing(false)} className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors">Cancel</button>
-                <button onClick={saveTodo} disabled={todoSaving} className="text-xs font-medium text-stone-600 dark:text-stone-300 border border-stone-300 dark:border-stone-600 rounded-lg px-3 py-1.5 hover:border-stone-500 dark:hover:border-stone-400 disabled:opacity-40 transition-colors">
-                  {todoSaving ? 'Saving…' : 'Save'}
-                </button>
-              </>
-            ) : (
-              <button onClick={loadTodo} aria-label="Refresh" className="text-sm text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors">↻</button>
-            )}
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-stone-100 dark:border-stone-800 gap-3 flex-shrink-0">
+            <button
+              onClick={cleanUpAndArchive}
+              className="text-xs font-medium text-stone-500 dark:text-stone-400 border border-stone-200 dark:border-stone-700 rounded-lg px-3 py-1.5 hover:border-stone-400 dark:hover:border-stone-500 hover:text-stone-700 dark:hover:text-stone-200 transition-colors"
+            >
+              Clean Up &amp; Archive
+            </button>
+            <div className="flex items-center gap-3">
+              {todoEditing ? (
+                <>
+                  <button onClick={() => setTodoEditing(false)} className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors">Cancel</button>
+                  <button onClick={saveTodo} disabled={todoSaving} className="text-xs font-medium text-stone-600 dark:text-stone-300 border border-stone-300 dark:border-stone-600 rounded-lg px-3 py-1.5 hover:border-stone-500 dark:hover:border-stone-400 disabled:opacity-40 transition-colors">
+                    {todoSaving ? 'Saving…' : 'Save'}
+                  </button>
+                </>
+              ) : (
+                <button onClick={loadTodo} aria-label="Refresh" className="text-sm text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors">↻</button>
+              )}
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto">
             {todoLoading ? (
@@ -360,10 +387,7 @@ export default function Home() {
                 style={{ fontSize: '16px' }}
               />
             ) : todoContent ? (
-              <div
-                className="px-4 py-4 cursor-text"
-                onClick={() => { setTodoEditValue(todoContent); setTodoEditing(true) }}
-              >
+              <div className="px-4 py-4 cursor-text" onClick={() => { setTodoEditValue(todoContent); setTodoEditing(true) }}>
                 {(() => {
                   let idx = 0
                   return (

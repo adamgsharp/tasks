@@ -71,6 +71,30 @@ export async function POST(req: Request) {
             }
           },
         }),
+        save_file_at_path: tool({
+          description:
+            'Write a file to any path in the vault repo. Use for archiving To Do lists or creating files outside the standard brain files. Always send complete file content.',
+          parameters: z.object({
+            path: z
+              .string()
+              .describe('Full repo path (e.g. "To Do/Archived/To Do Lists/To Do - 6-18-26.md")'),
+            content: z.string().describe('Complete file content'),
+            summary: z.string().describe('Short commit message'),
+          }),
+          execute: async ({ path, content, summary }) => {
+            try {
+              const existing = await getFile(path)
+              await putFile(path, content, `tasks: ${summary}`, existing?.sha)
+              return { ok: true, path, summary }
+            } catch (err) {
+              return {
+                ok: false,
+                path,
+                error: err instanceof Error ? err.message : 'write failed',
+              }
+            }
+          },
+        }),
       }
     : undefined
 
@@ -79,7 +103,7 @@ export async function POST(req: Request) {
     system: await buildSystemPrompt(mode, energy),
     messages,
     tools,
-    maxSteps: tools ? 5 : 1,
+    maxSteps: tools ? 8 : 1,
     maxTokens: 8192,
   })
 
