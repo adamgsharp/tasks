@@ -33,6 +33,11 @@ function toggleCheckboxInContent(content: string, checkboxIndex: number, current
   return lines.join('\n')
 }
 
+function isCheckboxTarget(e: React.MouseEvent): boolean {
+  const t = e.target as HTMLElement
+  return t.tagName === 'INPUT' && (t as HTMLInputElement).type === 'checkbox'
+}
+
 export default function Home() {
   const [energy, setEnergy] = useState<Energy>('mid')
   const [activeTab, setActiveTab] = useState<Tab>('chat')
@@ -292,7 +297,10 @@ export default function Home() {
                   </button>
                 </>
               ) : (
-                <button onClick={loadInbox} aria-label="Refresh" className="text-sm text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors">↻</button>
+                <>
+                  <button onClick={() => { setInboxEditValue(inboxContent ?? ''); setInboxEditing(true) }} className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors">Edit</button>
+                  <button onClick={loadInbox} aria-label="Refresh" className="text-sm text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors">↻</button>
+                </>
               )}
             </div>
           </div>
@@ -308,7 +316,7 @@ export default function Home() {
                 style={{ fontSize: '16px' }}
               />
             ) : inboxContent ? (
-              <div className="px-4 py-4 cursor-text" onClick={() => { setInboxEditValue(inboxContent); setInboxEditing(true) }}>
+              <div className="px-4 py-4">
                 {(() => {
                   let idx = 0
                   return (
@@ -366,7 +374,10 @@ export default function Home() {
                   </button>
                 </>
               ) : (
-                <button onClick={loadTodo} aria-label="Refresh" className="text-sm text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors">↻</button>
+                <>
+                  <button onClick={() => { setTodoEditValue(todoContent ?? ''); setTodoEditing(true) }} className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors">Edit</button>
+                  <button onClick={loadTodo} aria-label="Refresh" className="text-sm text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors">↻</button>
+                </>
               )}
             </div>
           </div>
@@ -382,7 +393,7 @@ export default function Home() {
                 style={{ fontSize: '16px' }}
               />
             ) : todoContent ? (
-              <div className="px-4 py-4 cursor-text" onClick={() => { setTodoEditValue(todoContent); setTodoEditing(true) }}>
+              <div className="px-4 py-4">
                 {(() => {
                   let idx = 0
                   return (
