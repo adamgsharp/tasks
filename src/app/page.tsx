@@ -415,7 +415,10 @@ export default function Home() {
     setActiveTab('chat')
     const today = new Date().toISOString().slice(0, 10)
     chatState.append(
-      { role: 'user', content: `Archive the current To Do list and clean it up:\n1. Read the \`created:\` date from frontmatter in the To Do content you have. Format it as M-DD-YY (e.g. 2026-06-18 → 6-18-26).\n2. Write the full current To Do content to \`To Do/Archived/To Do Lists/To Do - [dated name].md\` using save_file_at_path.\n3. Rewrite To Do.md using save_brain_file: keep all incomplete [ ] tasks in their sections, remove all completed [x] tasks, and set \`created: ${today}\` in the frontmatter.\n4. Briefly confirm what was archived and what was removed.` },
+      {
+        role: 'user',
+        content: `Run both tool calls now — do not describe, just execute:\n1. save_file_at_path: write the full current To Do content to \`To Do/Archived/To Do Lists/To Do - [M-DD-YY].md\` using the \`created:\` date from frontmatter (e.g. 2026-06-22 → filename "To Do - 6-22-26.md").\n2. save_brain_file (todo): rewrite keeping only incomplete [ ] tasks in their sections, remove all [x] tasks, set \`created: ${today}\` in frontmatter.\nAfter both calls succeed, confirm in one line what was archived and what was removed.`,
+      },
       { body: { energy: energyRef.current, mode: 'chat' } },
     )
   }
