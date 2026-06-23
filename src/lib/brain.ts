@@ -150,6 +150,7 @@ You can edit the vault yourself using the \`save_brain_file\` tool. It overwrite
 - "Today counts when ___" from /next output becomes the win when he confirms it's done.
 
 **How to save correctly:**
+- **Do not narrate tool calls.** When you need to save or execute, call the tool immediately — never describe what you're about to do first.
 - Always pass the COMPLETE new file content — you have the current content above; apply your change and send the whole thing.
 - Preserve existing formatting, headings, and table structure.
 - Only write when there's a real change. Pure conversation or permission-to-drop needs no save.
