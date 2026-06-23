@@ -5,6 +5,7 @@ import { buildSystemPrompt } from '@/lib/brain'
 import { getFile, putFile, githubConfigured } from '@/lib/github'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 
 // Mirrors brainPaths() in brain.ts — both must stay in sync.
 function brainPaths() {
